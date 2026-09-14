@@ -1,6 +1,7 @@
 /**********************************
 
 DRAGGER
+- with multi-select drag support
 
 **********************************/
 
@@ -13,6 +14,9 @@ function Dragger(loopy){
     self.dragging = null;
     self.offsetX = 0;
     self.offsetY = 0;
+    
+    // MOLAR: Para guardar las posiciones iniciales de los nodos seleccionados al iniciar el arrastre
+    self.initialPositions = {};
 
     subscribe("mousedown",function(){
 
@@ -31,7 +35,27 @@ function Dragger(loopy){
             self.dragging = dragNode;
             self.offsetX = Mouse.x - dragNode.x;
             self.offsetY = Mouse.y - dragNode.y;
-            if(!isRightClickDrag && window.innerWidth > 768) loopy.sidebar.edit(dragNode); // edit on desktop only
+            
+            // MOLAR: Guardar posición INICIAL del mouse (absoluta)
+            self.initialMouseX = Mouse.x;
+            self.initialMouseY = Mouse.y;
+            
+            // MOLAR: Si el nodo está en la selección múltiple, guardar posiciones de TODOS los seleccionados
+            if (loopy.selectedNodes.indexOf(dragNode) !== -1) {
+                self.initialPositions = {};
+                for (var i = 0; i < loopy.selectedNodes.length; i++) {
+                    var n = loopy.selectedNodes[i];
+                    self.initialPositions[n.id] = { x: n.x, y: n.y };
+                }
+            } else {
+                self.initialPositions = {};
+            }
+
+            // MOLAR: Solo abrir sidebar si NO se está haciendo CTRL+Click (usando variable infalible)
+            var isCtrlPressed = window._isCtrlPressedDuringClick;
+            if(!isRightClickDrag && window.innerWidth > 768 && !isCtrlPressed) {
+                loopy.sidebar.edit(dragNode);
+            }
             return;
         }
 
@@ -41,7 +65,7 @@ function Dragger(loopy){
             self.dragging = dragLabel;
             self.offsetX = Mouse.x - dragLabel.x;
             self.offsetY = Mouse.y - dragLabel.y;
-            if(!isRightClickDrag && window.innerWidth > 768) loopy.sidebar.edit(dragLabel); // edit on desktop only
+            if(!isRightClickDrag && window.innerWidth > 768 && !Key.control && !Key.meta) loopy.sidebar.edit(dragLabel);
             return;
         }
 
@@ -51,11 +75,12 @@ function Dragger(loopy){
             self.dragging = dragEdge;
             self.offsetX = Mouse.x - dragEdge.labelX;
             self.offsetY = Mouse.y - dragEdge.labelY;
-            if(!isRightClickDrag && window.innerWidth > 768) loopy.sidebar.edit(dragEdge); // edit on desktop only
+            if(!isRightClickDrag && window.innerWidth > 768 && !Key.control && !Key.meta) loopy.sidebar.edit(dragEdge);
             return;
         }
 
     });
+    
     subscribe("mousemove",function(){
 
         // ONLY WHEN EDITING
@@ -65,18 +90,28 @@ function Dragger(loopy){
         if(!self.dragging && self.loopy.tool!=Loopy.TOOL_DRAG) return;
 
         // If you're dragging a NODE, move it around!
-        if(self.dragging && self.dragging._CLASS_=="Node"){
+        if(self.dragging && self.dragging._CLASS_ == "Node"){
+            // MOLAR: Delta ABSOLUTO desde el punto de inicio del mouse (no desde el nodo)
+            var dx = Mouse.x - self.initialMouseX;
+            var dy = Mouse.y - self.initialMouseY;
 
-            // Model's been changed!
+            if (Object.keys(self.initialPositions).length > 0) {
+                // Mover TODOS los nodos seleccionados usando el delta absoluto
+                for (var id in self.initialPositions) {
+                    var n = loopy.model.getNode(parseInt(id));
+                    if (n) {
+                        n.x = self.initialPositions[id].x + dx;
+                        n.y = self.initialPositions[id].y + dy;
+                    }
+                }
+            } else {
+                // Mover solo el nodo clickeado
+                self.dragging.x = Mouse.x - self.offsetX;
+                self.dragging.y = Mouse.y - self.offsetY;
+            }
+            
+            // Publicamos el cambio UNA sola vez por frame
             publish("model/changed");
-            
-            var node = self.dragging;
-            node.x = Mouse.x - self.offsetX;
-            node.y = Mouse.y - self.offsetY;
-
-            // update coz visual glitches
-            loopy.model.update();
-            
         }
 
         // If you're dragging an EDGE, move it around!
@@ -123,9 +158,7 @@ function Dragger(loopy){
 
             }
 
-            // update coz visual glitches
-            loopy.model.update();
-
+            
         }
 
         // If you're dragging a LABEL, move it around!
@@ -138,12 +171,11 @@ function Dragger(loopy){
             label.x = Mouse.x - self.offsetX;
             label.y = Mouse.y - self.offsetY;
 
-            // update coz visual glitches
-            loopy.model.update();
             
         }
 
     });
+    
     subscribe("mouseup",function(){
 
         // ONLY WHEN EDITING
@@ -153,6 +185,7 @@ function Dragger(loopy){
         self.dragging = null;
         self.offsetX = 0;
         self.offsetY = 0;
+        self.initialPositions = {}; // MOLAR: Limpiar estado de arrastre múltiple
 
     });
 
@@ -163,6 +196,7 @@ function Dragger(loopy){
             self.dragging = null;
             self.offsetX = 0;
             self.offsetY = 0;
+            self.initialPositions = {}; // MOLAR: Limpiar estado de arrastre múltiple
         }
     });
 

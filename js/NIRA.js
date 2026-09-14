@@ -1,7 +1,7 @@
 /**********************************
 
 NIRA!
-- Network InteRvention Analysis (Lite, Fase 1)
+- Network InteRvention Analysis (Lite)
 
 Algoritmo de identificación de mejores dianas de intervención,
 100% client-side. Recorre la red, mide el impacto de intervenir
@@ -66,6 +66,17 @@ var NIRA = {
     CHUNK_TICKS: 200
 };
 
+// ==========================================
+// MOLAR: Obtener solo los nodos visibles (Red Visible)
+// ==========================================
+NIRA.getVisibleNodes = function(model) {
+    var visible = [];
+    for (var i = 0; i < model.nodes.length; i++) {
+        if (!model.nodes[i].hidden) visible.push(model.nodes[i]);
+    }
+    return visible;
+};
+
 //////////////////////////////////////
 // TOTAL SCORE ///////////////////////
 //////////////////////////////////////
@@ -76,11 +87,11 @@ var NIRA = {
 // intervención aporta +1 (o el INTENSITY) y su propio desequilibrio
 // (1 - init); excluirlo deja solo la propagación al RESTO del sistema
 // (efecto cascada), que es lo clínicamente relevante al elegir una diana.
-NIRA.totalScore = function(model, excludeIdx){
-    var nodes = model.nodes;
+NIRA.totalScore = function(model, excludeNode) {
+    var nodes = NIRA.getVisibleNodes(model);
     var sum = 0;
-    for(var i=0;i<nodes.length;i++){
-        if(i === excludeIdx) continue;
+    for (var i = 0; i < nodes.length; i++) {
+        if (excludeNode && nodes[i] === excludeNode) continue;
         sum += nodes[i].value;
     }
     return sum;
@@ -93,7 +104,7 @@ NIRA.totalScore = function(model, excludeIdx){
 // Clamp sobre el valor del nodo (no sobre signal.delta), así que no
 // rompe la propagación: solo limita el estado que da el puntaje total.
 NIRA.clampValues = function(model){
-    var nodes = model.nodes;
+    var nodes = model.nodes.filter(function(n) { return !n.hidden; });
     for(var i=0;i<nodes.length;i++){
         var v = nodes[i].value;
         if(v < NIRA.VALUE_MIN)      nodes[i].value = NIRA.VALUE_MIN;
@@ -210,7 +221,6 @@ NIRA.runSimulationUntilStable = function(loopy, maxTicks, threshold, minStableTi
     var nodes = model.nodes;
     var n = nodes.length;
 
-    // Array reusado para el estado previo.
     var prev = NIRA._prevValues;
     if(!prev || prev.length < n) prev = NIRA._prevValues = new Array(n);
 
@@ -218,7 +228,24 @@ NIRA.runSimulationUntilStable = function(loopy, maxTicks, threshold, minStableTi
     var t;
     for(t=0; t<maxTicks; t++){
         model.update();
-        NIRA.clampValues(model); // acotar valores tras cada tick (anti-explosión)
+        NIRA.clampValues(model);
+
+        // Cada 10 ticks: forzar emisión de señales pendientes
+        // (simula el setTimeout de 100ms de forma síncrona)
+        if(t % 10 === 0){
+            for(var i=0;i<n;i++){
+                if(nodes[i].aggregate){
+                    clearTimeout(nodes[i].aggregate);
+                    nodes[i].aggregate = null;
+                    nodes[i].sendSignal({
+                        delta: nodes[i].value * 0.3,
+                        age: 1000000
+                    });
+                    nodes[i].deltaPool = 0;
+                }
+            }
+        }
+
         if(t === 0){
             for(var i=0;i<n;i++) prev[i] = nodes[i].value;
             continue;
@@ -301,8 +328,8 @@ NIRA.analyze = function(loopy, options){
 
     // Snapshot del estado del usuario (se restaura al finalizar).
     var snap = NIRA.snapshot(loopy);
-    var nodes = model.nodes;
-    var totalTasks = nodes.length + 1; // control + 1 por nodo
+    var nodes = NIRA.getVisibleNodes(model);
+    var totalTasks = nodes.length + 1;
     var taskIndex = 0;     // 0 = control, k>0 = nodo k-1
     var taskTicksDone = 0; // ticks consumidos en la tarea actual
     var baseScore = 0;     // puntaje total del control (Σ de todos los nodos)
@@ -339,14 +366,11 @@ NIRA.analyze = function(loopy, options){
             // baseScore = puntaje total del control con TODOS los nodos (sin
             // exclusión: en el control no hay diana). Es el mismo escalar para
             // todas las intervenciones.
-            baseScore = NIRA.totalScore(model);
-            // Guardar el valor final de cada nodo en el control para que cada
-            // intervención pueda excluir su diana también del control:
-            //   controlScore(diana) = baseScore - controlValues[diana]
-            controlValues = [];
-            for(var ci=0; ci<model.nodes.length; ci++){
-                controlValues.push(model.nodes[ci].value);
-            }
+   baseScore = NIRA.totalScore(model, null);
+   controlValues = {};
+   for(var ci=0; ci<nodes.length; ci++){
+       controlValues[nodes[ci].id] = nodes[ci].value;
+   }
         }else{
             // Tarea de intervención sobre nodo taskIndex-1.
             // Métrica de DERRAME (spillover): excluimos el nodo diana del
@@ -358,11 +382,11 @@ NIRA.analyze = function(loopy, options){
             //   impact = totalScore(post,  exclude=diana)   (= postScoreExcl)
             //          - totalScore(control, exclude=diana) (= controlScoreExcl
             //              = baseScore - controlValues[idx])
-            var idx = taskIndex - 1;
-            var node = nodes[idx];
-            var postScoreExcl = NIRA.totalScore(model, idx);   // Σ_post sin diana
-            var controlScoreExcl = baseScore - controlValues[idx]; // Σ_control sin diana
-            var impact = postScoreExcl - controlScoreExcl;     // derrame
+   var idx = taskIndex - 1;
+   var node = nodes[idx];
+   var postScoreExcl = NIRA.totalScore(model, node); // Excluir el nodo intervenido
+   var controlScoreExcl = baseScore - (controlValues[node.id] || 0);
+   var impact = postScoreExcl - controlScoreExcl;
             results.push({
                 node: node,
                 label: node.label,
@@ -496,13 +520,13 @@ NIRA: Pasada rápida CON perturbación (rompe el determinismo)
 **********************************/
 NIRA._runSinglePass = function(loopy) {
     var model = loopy.model;
-    var nodes = model.nodes;
+    var nodes = NIRA.getVisibleNodes(model);
     var snap = NIRA.snapshot(loopy);
     var prevMode = loopy.mode;
     loopy.mode = Loopy.MODE_PLAY;
 
     // >>> PERTURBACIÓN ALEATORIA (RUIDO) <<<
-    var perturbationStrength = 0.05; // 5% de ruido
+    var perturbationStrength = 0.05;
     for (var i = 0; i < nodes.length; i++) {
         var noise = (Math.random() - 0.5) * 2 * perturbationStrength;
         nodes[i].value = Math.max(0, Math.min(1, nodes[i].value + noise));
@@ -510,11 +534,15 @@ NIRA._runSinglePass = function(loopy) {
 
     // 1. Control (baseline) con ruido
     NIRA.runSimulationUntilStable(loopy, NIRA.MAX_TICKS, NIRA.THRESHOLD, NIRA.MIN_STABLE_TICKS);
-    var baseScore = NIRA.totalScore(model);
-    var controlValues = nodes.map(function(n) { return n.value; });
+    var baseScore = NIRA.totalScore(model, null);
+    var controlValues = {};
+    for (var i = 0; i < nodes.length; i++) {
+        controlValues[nodes[i].id] = nodes[i].value;
+    }
+
     var results = [];
 
-    // 2. Intervenciones (una por nodo)
+    // 2. Intervenciones (una por nodo VISIBLE)
     for (var i = 0; i < nodes.length; i++) {
         NIRA.restore(loopy, snap);
         loopy.mode = Loopy.MODE_PLAY;
@@ -526,19 +554,20 @@ NIRA._runSinglePass = function(loopy) {
         }
         
         NIRA.runSimulationUntilStable(loopy, NIRA.MAX_TICKS, NIRA.THRESHOLD, NIRA.MIN_STABLE_TICKS);
-        var perturbedBaseScore = NIRA.totalScore(model);
-        var perturbedControlValues = nodes.map(function(n) { return n.value; });
-        
+        var perturbedBaseScore = NIRA.totalScore(model, null);
+        var perturbedControlValues = {};
+        for (var k = 0; k < nodes.length; k++) {
+            perturbedControlValues[nodes[k].id] = nodes[k].value;
+        }
+
         var node = nodes[i];
         node.takeSignal({ delta: NIRA.INTENSITY });
         NIRA.clampValues(model);
-        
         NIRA.runSimulationUntilStable(loopy, NIRA.MAX_TICKS, NIRA.THRESHOLD, NIRA.MIN_STABLE_TICKS);
-        
-        var postScoreExcl = NIRA.totalScore(model, i);
-        var controlScoreExcl = perturbedBaseScore - perturbedControlValues[i];
+
+        var postScoreExcl = NIRA.totalScore(model, node);
+        var controlScoreExcl = perturbedBaseScore - (perturbedControlValues[node.id] || 0);
         var impact = postScoreExcl - controlScoreExcl;
-        
         results.push({ node: node, label: node.label, impact: impact });
     }
 
@@ -559,25 +588,30 @@ NIRA.analyzeStability = function(loopy, iterations, onProgress, onComplete, onEr
         onError("No hay nodos en la red para analizar.");
         return;
     }
-
     NIRA.running = true;
     NIRA.cancelled = false;
-    var nodes = model.nodes;
+    
+    // ==========================================
+    // NIRA: ENCENDER EL INTERRUPTOR MAESTRO
+    // ==========================================
+    loopy._niraRunning = true;
+    // ==========================================
+
+    var nodes = model.nodes.filter(function(n) { return !n.hidden; });
     var stabilityCounts = {};
     nodes.forEach(function(n) {
         stabilityCounts[n.id] = { label: n.label, top1: 0, top3: 0, top5: 0 };
     });
-
     var currentIter = 0;
     var batchSize = 5; // Lotes de 5 para no congelar la UI
-
+    
     var processBatch = function() {
         if (NIRA.cancelled) {
             NIRA.running = false;
+            loopy._niraRunning = false; // APAGAR AL CANCELAR
             onError("Análisis cancelado por el usuario.");
             return;
         }
-
         if (currentIter >= iterations) {
             var finalRanking = [];
             for (var id in stabilityCounts) {
@@ -590,12 +624,11 @@ NIRA.analyzeStability = function(loopy, iterations, onProgress, onComplete, onEr
                 });
             }
             finalRanking.sort(function(a, b) { return b.top1 - a.top1; });
-            
             NIRA.running = false;
+            loopy._niraRunning = false; // APAGAR AL TERMINAR
             onComplete(finalRanking);
             return;
         }
-
         var limit = Math.min(currentIter + batchSize, iterations);
         for (var i = currentIter; i < limit; i++) {
             var singleRunResults = NIRA._runSinglePass(loopy);
@@ -607,11 +640,9 @@ NIRA.analyzeStability = function(loopy, iterations, onProgress, onComplete, onEr
             }
         }
         currentIter = limit;
-
         onProgress(currentIter, iterations);
         setTimeout(processBatch, 0); // Cede el hilo al navegador
     };
-
     setTimeout(processBatch, 0);
 };
 

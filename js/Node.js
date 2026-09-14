@@ -191,7 +191,7 @@ var _listenerReset = subscribe("model/reset", function(){
             // Solo emitir si seguimos en PLAY
             if(self.loopy.mode === Loopy.MODE_PLAY){
                 self.sendSignal({
-                    delta: self.value * 0.3,   // ← value, no deltaPool
+                    delta: self.value * 0.3,
                     age: myAge
                 });
             }
@@ -333,15 +333,16 @@ var _listenerReset = subscribe("model/reset", function(){
             ctx.fill();
         }
 
-        // DRAW HIGHLIGHT???
-        if(self.loopy.sidebar.currentPage.target == self){
-            ctx.beginPath();
-            // ctx.arc(0, 0, r+40, 0, Math.TAU, false);
-            self.getPath(ctx, r+40);
-            ctx.fillStyle = HIGHLIGHT_COLOR;
-            ctx.fill();
-        }
+        // DRAW HIGHLIGHT??? (Default OR Molar Multi-selection)
+var isSelectedInSidebar = (self.loopy.sidebar.currentPage && self.loopy.sidebar.currentPage.target == self);
+var isSelectedInArray = (self.loopy.selectedNodes && self.loopy.selectedNodes.indexOf(self) !== -1);
 
+if(isSelectedInSidebar || isSelectedInArray){
+    ctx.beginPath();
+    self.getPath(ctx, r+40); // Mismo radio extra que usa Loopy por defecto
+    ctx.fillStyle = HIGHLIGHT_COLOR; // Mismo color azul suave definido en helpers.js
+    ctx.fill();
+}
         // White-gray bubble with colored border
         ctx.beginPath();
         // ctx.arc(0, 0, r-2, 0, Math.TAU, false);

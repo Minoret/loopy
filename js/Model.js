@@ -4,6 +4,12 @@ MODEL!
 
 **********************************/
 
+// MOLAR: Variable global infalible para detectar CTRL en el momento exacto del click
+window._isCtrlPressedDuringClick = false;
+document.addEventListener("mousedown", function(e) {
+    window._isCtrlPressedDuringClick = e.ctrlKey || e.metaKey;
+});
+
 function Model(loopy){
 
     var self = this;
@@ -11,6 +17,9 @@ function Model(loopy){
 
     // Properties
     self.speed = 0.05;
+    self.tickCount = 0; // ←
+    // MOLAR: Historial de molares desagrupados (para resolver referencias rotas)
+    self.molarHistory = {};
 
     // Create canvas & context
     var canvas = _createCanvas();
@@ -18,7 +27,14 @@ function Model(loopy){
     self.canvas = canvas;
     self.context = ctx;
 
-
+    // MOLAR: Capturar información de teclas modificadoras en cada click
+    var _lastMouseEvent = null;
+    document.addEventListener("mousedown", function(event) {
+        window._isCtrlPressedDuringClick = event.ctrlKey || event.metaKey;
+    });
+    document.addEventListener("mouseup", function() {
+        window._isCtrlPressedDuringClick = false; // Limpiar al soltar
+    });
 
     ///////////////////
     // NODES //////////
@@ -69,6 +85,453 @@ function Model(loopy){
         
     };
 
+// ==========================================
+// MOLAR: Resolver referencias a nodos que fueron molares ya desagrupados
+// y redirigir aristas si los nodos originales siguen ocultos en otros molares.
+// ==========================================
+self._resolveEdgeRef = function(saved) {
+    var fromNode = self.getNode(saved.from);
+    var toNode = self.getNode(saved.to);
+    
+    // Función auxiliar: si un nodo está oculto, encontrar el ID del molar que lo contiene
+    var _redirectIfHidden = function(nodeId) {
+        var node = self.getNode(nodeId);
+        if (node && node.hidden) {
+            for (var i = 0; i < self.nodes.length; i++) {
+                var n = self.nodes[i];
+                if (n.isMolar && n.children && n.children.indexOf(nodeId) !== -1) {
+                    return n.id; // Redirigir al molar activo
+                }
+            }
+        }
+        return nodeId; // No está oculto, devolver el ID tal cual
+    };
+    
+    // Caso 1: ambos nodos existen en el modelo → redirigir si están ocultos
+    if (fromNode && toNode) {
+        var actualFrom = _redirectIfHidden(saved.from);
+        var actualTo = _redirectIfHidden(saved.to);
+        if (actualFrom !== actualTo) {
+            return [{ from: actualFrom, to: actualTo, strength: saved.strength, arc: saved.arc, rotation: saved.rotation }];
+        }
+        return [];
+    }
+    
+    // Caso 2: 'from' existe, 'to' fue un molar ya desagrupado
+    if (fromNode && !toNode && self.molarHistory[saved.to]) {
+        var history = self.molarHistory[saved.to];
+        var results = [];
+        history.savedEdges.forEach(function(he) {
+            if (he.from === saved.from && history.children.indexOf(he.to) !== -1) {
+                var actualFrom = _redirectIfHidden(he.from);
+                var actualTo = _redirectIfHidden(he.to);
+                if (actualFrom !== actualTo) {
+                    results.push({ from: actualFrom, to: actualTo, strength: he.strength, arc: he.arc, rotation: he.rotation || 0 });
+                }
+            }
+        });
+        return results;
+    }
+    
+    // Caso 3: 'from' fue un molar ya desagrupado, 'to' existe
+    if (!fromNode && toNode && self.molarHistory[saved.from]) {
+        var history = self.molarHistory[saved.from];
+        var results = [];
+        history.savedEdges.forEach(function(he) {
+            if (history.children.indexOf(he.from) !== -1 && he.to === saved.to) {
+                var actualFrom = _redirectIfHidden(he.from);
+                var actualTo = _redirectIfHidden(he.to);
+                if (actualFrom !== actualTo) {
+                    results.push({ from: actualFrom, to: actualTo, strength: he.strength, arc: he.arc, rotation: he.rotation || 0 });
+                }
+            }
+        });
+        return results;
+    }
+    
+    // Caso 4: ambos fueron molares ya desagrupados
+    if (!fromNode && !toNode && self.molarHistory[saved.from] && self.molarHistory[saved.to]) {
+        var fromHistory = self.molarHistory[saved.from];
+        var toHistory = self.molarHistory[saved.to];
+        var results = [];
+        fromHistory.savedEdges.forEach(function(he) {
+            if (fromHistory.children.indexOf(he.from) !== -1 && toHistory.children.indexOf(he.to) !== -1) {
+                var actualFrom = _redirectIfHidden(he.from);
+                var actualTo = _redirectIfHidden(he.to);
+                if (actualFrom !== actualTo) {
+                    results.push({ from: actualFrom, to: actualTo, strength: he.strength, arc: he.arc, rotation: he.rotation || 0 });
+                }
+            }
+        });
+        return results;
+    }
+    
+    // Si no se puede resolver de ninguna manera, devolver array vacío
+    return [];
+};
+
+// ==========================================
+// MOLAR: Agrupación de Nodos (Versión Corregida y Blindada)
+// ==========================================
+
+self.groupNodes = function(nodeArray) {
+    if (!nodeArray || nodeArray.length < 2) return;
+    if(loopy.saveUndo) loopy.saveUndo();
+    
+    // 1. APLANAMIENTO: Evita grupos anidados como ((AB)C)
+    var finalNodesToGroup = [];
+    var molarsToDestroy = [];
+    
+    nodeArray.forEach(function(n) {
+        if (n.isMolar && n.children) {
+            molarsToDestroy.push(n);
+            n.children.forEach(function(childId) {
+                var child = self.getNode(childId);
+                if (child && !child.hidden) {
+                    finalNodesToGroup.push(child);
+                }
+            });
+        } else {
+            finalNodesToGroup.push(n);
+        }
+    });
+    
+    // Eliminar duplicados
+    finalNodesToGroup = finalNodesToGroup.filter(function(item, pos) {
+        return finalNodesToGroup.indexOf(item) == pos;
+    });
+    
+    if (finalNodesToGroup.length < 2) return;
+
+    // 2. Calcular centroide
+    var sumX = 0, sumY = 0;
+    finalNodesToGroup.forEach(function(n) { sumX += n.x; sumY += n.y; });
+    
+    // 3. Crear el nodo molar USANDO addNode (que devuelve el nodo real del modelo)
+    var molar = self.addNode({
+        x: sumX / finalNodesToGroup.length,
+        y: sumY / finalNodesToGroup.length,
+        label: "?",
+        hue: finalNodesToGroup[0].hue,
+        borderWidth: 12
+    });
+    
+    // 4. ASIGNAR PROPIEDADES PERSONALIZADAS AL NODO REAL DEVUELTO POR addNode
+    molar.isMolar = true;
+    molar.children = [];
+    molar.savedEdges = [];
+    
+    // 5. Ocultar hijos y registrar sus IDs en el molar real
+    var childIds = finalNodesToGroup.map(function(n) { 
+        n.hidden = true; 
+        return n.id; 
+    });
+    molar.children = childIds.slice(); // ¡Ahora sí se guarda en el nodo correcto!
+    
+    // 6. GESTIONAR ARISTAS: Preservar internas, agregar Interruptor Maestro, y eliminar externas
+    var edgesToKill = [];
+    
+    self.edges.forEach(function(edge) {
+        var fromIsChild = childIds.indexOf(edge.from.id) !== -1;
+        var toIsChild = childIds.indexOf(edge.to.id) !== -1;
+        
+        // A. Guardamos TODA arista que toque un hijo en el historial (para desagrupar después)
+        if (fromIsChild || toIsChild) {
+            molar.savedEdges.push({
+                from: edge.from.id,
+                to: edge.to.id,
+                strength: edge.strength,
+                arc: edge.arc,
+                rotation: edge.rotation || 0
+            });
+        }
+        
+        // B. PERO solo marcamos para eliminar las que van HACIA AFUERA del grupo.
+        // Si ambas son hijos (fromIsChild && toIsChild), NO la matamos. Se preserva la resonancia interna.
+        if (fromIsChild !== toIsChild) {
+            edgesToKill.push(edge);
+        }
+    });
+
+    // 7. EL INTERRUPTOR MAESTRO (NUEVO): Conectar el Molar a sus hijos para activarlos
+    // Esto asegura que cuando NIRA interviene el molar, la señal se distribuya a los hijos
+    childIds.forEach(function(childId) {
+        self.addEdge({
+            from: molar.id,
+            to: childId,
+            strength: 1.0, // Fuerza máxima para asegurar que el hijo se active
+            signal: 1.0,   // ¡Clave para que la señal viaje del molar al hijo!
+            arc: 0,
+            rotation: 0
+        });
+    });
+
+    // 8. Ejecutar eliminaciones y aplanamiento
+    edgesToKill.forEach(function(e) { e.kill(); });
+    
+    molarsToDestroy.forEach(function(oldMolar) {
+        oldMolar.kill();
+    });
+    
+    // 9. Crear aristas simplificadas VISUALES hacia el exterior
+    var edgeMap = {};
+    molar.savedEdges.forEach(function(se) {
+        var isChildOutgoing = (childIds.indexOf(se.from) !== -1);
+        var externalId = isChildOutgoing ? se.to : se.from;
+        
+        // Solo nos interesan las conexiones hacia fuera del grupo
+        if (childIds.indexOf(externalId) === -1) {
+            var key = externalId + '_' + (isChildOutgoing ? 'out' : 'in');
+            if (!edgeMap[key]) {
+                edgeMap[key] = { externalId: externalId, isOutgoing: isChildOutgoing, totalStrength: 0, count: 0 };
+            }
+            edgeMap[key].totalStrength += se.strength;
+            edgeMap[key].count += 1;
+        }
+    });
+    
+    var arcCounter = {};
+    for (var key in edgeMap) {
+        var group = edgeMap[key];
+        var pairKey = Math.min(molar.id, group.externalId) + '_' + Math.max(molar.id, group.externalId);
+        if (!arcCounter[pairKey]) arcCounter[pairKey] = 0;
+        
+        var safeArc = 0;
+        if (arcCounter[pairKey] === 0) safeArc = 1;
+        else if (arcCounter[pairKey] === 1) safeArc = -1;
+        else safeArc = arcCounter[pairKey];
+        arcCounter[pairKey]++;
+        
+        var clampedStrength = Math.max(-2, Math.min(2, group.totalStrength));
+        
+        self.addEdge({
+            from: group.isOutgoing ? molar.id : group.externalId,
+            to: group.isOutgoing ? group.externalId : molar.id,
+            strength: clampedStrength,
+            signal: clampedStrength, // <-- Esto ya lo tenías, ¡perfecto!
+            arc: safeArc,
+            rotation: 0
+        });
+    }
+    
+    publish("model/changed");
+    return molar;
+};
+
+// ==========================================
+// FUNCIONES FALTANTES DE AGRUPACIÓN
+// ==========================================
+
+// ==========================================
+// MOLAR: Quitar un solo nodo de un grupo (Botón "X" en el Sidebar)
+// ==========================================
+self.removeNodeFromGroup = function(molarNode, childNode) {
+    if (!molarNode || !molarNode.isMolar || !childNode) return;
+    if(loopy.saveUndo) loopy.saveUndo();
+    
+    var idx = molarNode.children.indexOf(childNode.id);
+    if (idx === -1) return;
+    
+    // 1. Quitar el hijo del array del molar
+    molarNode.children.splice(idx, 1);
+    
+    // 2. Hacer visible al hijo y resetear su valor
+    childNode.hidden = false;
+    childNode.value = childNode.init;
+    
+    // 3. Si el molar queda con 0 o 1 hijo, se auto-destruye (desagrupa todo)
+    if (molarNode.children.length <= 1) {
+        if (molarNode.children.length === 1) {
+            var lastChildId = molarNode.children[0];
+            var lastChild = self.getNode(lastChildId);
+            if (lastChild) {
+                lastChild.hidden = false;
+                lastChild.value = lastChild.init;
+            }
+            molarNode.children = [];
+        }
+        self.ungroupNode(molarNode);
+        return;
+    }
+    
+    // 4. Si aún quedan 2 o más hijos, debemos recalcular las aristas
+    // Matamos las aristas actuales del molar para recalcularlas
+    var edgesToRemove = self.edges.filter(function(edge) {
+        return edge.from.id === molarNode.id || edge.to.id === molarNode.id;
+    });
+    edgesToRemove.forEach(function(edge) { edge.kill(); });
+    
+    // Filtramos las aristas guardadas: separamos las que eran del hijo que sacamos
+    var newSavedEdges = [];
+    var restoredEdgesForChild = [];
+    
+    molarNode.savedEdges.forEach(function(se) {
+        var involvesExtractedChild = (se.from === childNode.id || se.to === childNode.id);
+        var involvesOtherChild = (molarNode.children.indexOf(se.from) !== -1 || molarNode.children.indexOf(se.to) !== -1);
+        
+        if (involvesExtractedChild && !involvesOtherChild) {
+            // Era una arista externa exclusiva del hijo que sacamos. La restauramos directamente.
+            restoredEdgesForChild.push(se);
+        } else {
+            // Sigue siendo parte del molar (interna entre los restantes, o externa de otro hijo)
+            newSavedEdges.push(se);
+        }
+    });
+    
+    molarNode.savedEdges = newSavedEdges;
+    
+    // Restaurar las aristas del hijo liberado
+    restoredEdgesForChild.forEach(function(se) {
+        var fromNode = self.getNode(se.from);
+        var toNode = self.getNode(se.to);
+        if (fromNode && toNode) {
+            // Si el otro extremo está oculto (en otro molar), redirigir
+            var actualFrom = fromNode.hidden ? (self._findMolarContaining(fromNode.id) || fromNode).id : fromNode.id;
+            var actualTo = toNode.hidden ? (self._findMolarContaining(toNode.id) || toNode).id : toNode.id;
+            
+            if (actualFrom !== actualTo) {
+                var edgeExists = self.edges.some(function(e) {
+                    return e.from.id === actualFrom && e.to.id === actualTo;
+                });
+                if (!edgeExists) {
+                    self.addEdge({
+                        from: actualFrom, to: actualTo,
+                        strength: se.strength, arc: se.arc, rotation: se.rotation || 0
+                    });
+                }
+            }
+        }
+    });
+    
+    // Recrear las aristas externas del MOLAR (con los hijos restantes)
+    var edgeMap = {};
+    molarNode.savedEdges.forEach(function(se) {
+        var fromIsChild = molarNode.children.indexOf(se.from) !== -1;
+        var toIsChild = molarNode.children.indexOf(se.to) !== -1;
+        
+        if (fromIsChild !== toIsChild) {
+            var isChildOutgoing = fromIsChild;
+            var externalId = isChildOutgoing ? se.to : se.from;
+            var key = externalId + '_' + (isChildOutgoing ? 'out' : 'in');
+            if (!edgeMap[key]) {
+                edgeMap[key] = { externalId: externalId, isOutgoing: isChildOutgoing, totalStrength: 0 };
+            }
+            edgeMap[key].totalStrength += se.strength;
+        }
+    });
+    
+    var arcCounter = {};
+    for (var key in edgeMap) {
+        var group = edgeMap[key];
+        var pairKey = Math.min(molarNode.id, group.externalId) + '_' + Math.max(molarNode.id, group.externalId);
+        if (!arcCounter[pairKey]) arcCounter[pairKey] = 0;
+        
+        var safeArc = 0;
+        if (arcCounter[pairKey] === 0) safeArc = 1;
+        else if (arcCounter[pairKey] === 1) safeArc = -1;
+        else safeArc = arcCounter[pairKey];
+        arcCounter[pairKey]++;
+        
+        var clampedStrength = Math.max(-2, Math.min(2, group.totalStrength));
+        
+        self.addEdge({
+            from: group.isOutgoing ? molarNode.id : group.externalId,
+            to: group.isOutgoing ? group.externalId : molarNode.id,
+            strength: clampedStrength,
+            arc: safeArc,
+            rotation: 0
+        });
+    }
+    
+    // 5. Restaurar el Interruptor Maestro para los hijos restantes
+    molarNode.children.forEach(function(cId) {
+        var exists = self.edges.some(function(e) {
+            return e.from.id === molarNode.id && e.to.id === cId;
+        });
+        if (!exists) {
+            self.addEdge({
+                from: molarNode.id,
+                to: cId,
+                strength: 1.0,
+                arc: 0,
+                rotation: 0
+            });
+        }
+    });
+
+    publish("model/changed");
+};
+
+self.ungroupNode = function(molarNode) {
+    if (!molarNode || !molarNode.isMolar) return;
+    if(loopy.saveUndo) loopy.saveUndo();
+    
+    // GUARDAR EN HISTORIAL antes de eliminar (para resolver referencias rotas futuras)
+    if (!self.molarHistory) self.molarHistory = {};
+    self.molarHistory[molarNode.id] = {
+        children: molarNode.children ? molarNode.children.slice() : [],
+        savedEdges: molarNode.savedEdges ? molarNode.savedEdges.slice() : []
+    };
+    
+    // 1. Hacer visibles los hijos
+    if (molarNode.children && molarNode.children.length > 0) {
+        molarNode.children.forEach(function(childId) {
+            var child = self.getNode(childId);
+            if (child) {
+                child.hidden = false;
+                child.value = child.init;
+            }
+        });
+    }
+    
+    // 2. Eliminar las aristas actuales del molar
+    var edgesToRemove = self.edges.filter(function(edge) {
+        return edge.from.id === molarNode.id || edge.to.id === molarNode.id;
+    });
+    edgesToRemove.forEach(function(edge) { edge.kill(); });
+    
+    // 3. Restaurar aristas usando el resolvedor de referencias
+    if (molarNode.savedEdges && molarNode.savedEdges.length > 0) {
+       molarNode.savedEdges.forEach(function(saved) {
+           var resolvedEdges = self._resolveEdgeRef(saved);
+           resolvedEdges.forEach(function(re) {
+               var edgeExists = self.edges.some(function(e) {
+                   return e.from.id === re.from && e.to.id === re.to;
+               });
+               if (!edgeExists) {
+                   var safeArc = re.arc;
+                   if (Math.abs(safeArc) < 2) safeArc = safeArc >= 0 ? 2 : -2;
+                   self.addEdge({
+                       from: re.from, to: re.to,
+                       strength: re.strength, arc: safeArc, rotation: re.rotation || 0
+                   });
+               }
+           });
+       });
+   }
+    
+    // 4. Limpiar selección del molar
+    self.loopy.selectedNodes = self.loopy.selectedNodes.filter(function(n) {
+        return n && n.id !== molarNode.id;
+    });
+    
+    // 5. Eliminar el molar
+    molarNode.kill();
+    publish("model/changed");
+};
+
+// Función auxiliar
+self._findMolarContaining = function(nodeId) {
+    for (var i = 0; i < self.nodes.length; i++) {
+        var n = self.nodes[i];
+        if (n.isMolar && n.children && n.children.indexOf(nodeId) !== -1) {
+            return n;
+        }
+    }
+    return null;
+};
+
+// ==========================================
 
     ///////////////////
     // EDGES //////////
@@ -149,7 +612,6 @@ function Model(loopy){
     ///////////////////
 
     var _canvasDirty = false;
-
     self.update = function(){
 
         // Update edges THEN nodes
@@ -227,7 +689,14 @@ function Model(loopy){
 
         // Draw labels THEN edges THEN nodes
         for(var i=0;i<self.labels.length;i++) self.labels[i].draw(ctx);
-        for(var i=0;i<self.edges.length;i++) self.edges[i].draw(ctx);
+        
+        for(var i=0;i<self.edges.length;i++){
+            var edge = self.edges[i];
+            // === AGREGAR ESTA LÍNEA: No dibujar aristas si alguno de los nodos está oculto ===
+            if (edge.from.hidden || edge.to.hidden) continue;
+            edge.draw(ctx);
+        }
+        
         for(var i=0;i<self.nodes.length;i++){
             var node = self.nodes[i];
             if(node.hidden) continue; // MOLAR: no dibujar nodos ocultos
@@ -236,7 +705,6 @@ function Model(loopy){
 
         // Restore
         ctx.restore();
-
     };
 
 
@@ -372,14 +840,8 @@ function Model(loopy){
             });
         }
 
-        // MOLAR (Fase 1): pos-proceso con TODOS los nodos ya creados.
-        // Sanear datos corruptos:
-        //  (a) Un molar debe tener TODOS sus hijos vivos en el modelo; si
-        //      falta alguno, se degrada a nodo normal (isMolar=false,
-        //      children=null, savedEdges=null, borderWidth=2).
-        //  (b) Un nodo oculto que NO pertenezca al array children de un
-        //      molar vivo se muestra de nuevo (hidden=false).
-        // children se serializan como ids; aquí se resuelven a nodos vivos.
+        // MOLAR: pos-proceso con TODOS los nodos ya creados.
+        // Sanear datos y asegurar que 'children' sea SIEMPRE un array de IDs.
         for(var i=0;i<self.nodes.length;i++){
             var n = self.nodes[i];
             if(n.isMolar && n.children && n.children.length>0){
@@ -396,7 +858,8 @@ function Model(loopy){
                     n.savedEdges = null;
                     n.borderWidth = 2;
                 }else{
-                    n.children = resolved;
+                    // CLAVE: Mantener como array de IDs, no de objetos
+                    n.children = resolved.map(function(childNode){ return childNode.id; });
                 }
             }
         }
@@ -406,7 +869,8 @@ function Model(loopy){
                 var ownedByMolar = false;
                 for(var j=0;j<self.nodes.length;j++){
                     var m = self.nodes[j];
-                    if(m.isMolar && m.children && m.children.indexOf(n)!==-1){
+                    // CLAVE: buscar por n.id, no por el objeto n
+                    if(m.isMolar && m.children && m.children.indexOf(n.id)!==-1){
                         ownedByMolar = true;
                         break;
                     }
@@ -448,25 +912,25 @@ function Model(loopy){
     };
 
     self.clear = function(){
-
         // Just kill ALL nodes.
         while(self.nodes.length>0){
             self.nodes[0].kill();
         }
-
         // Just kill ALL labels.
         while(self.labels.length>0){
             self.labels[0].kill();
         }
+        // MOLAR: Limpiar historial
+        self.molarHistory = {};
     };
 
     self.newModel = function(){
         self.clear();
         Node._UID = 0;
         self.loopy.showGrid = false;
+        self.molarHistory = {};
         publish("model/changed");
     };
-
 
 
     ////////////////////
@@ -504,45 +968,70 @@ function Model(loopy){
         return null;
     };
 
-    // Click/Double-click to edit!
-    var _editCallback = function(){
+// Click/Double-click to edit!
+var _editCallback = function(){
 
-        // ONLY WHEN EDITING (and NOT erase)
-        if(self.loopy.mode!=Loopy.MODE_EDIT) return;
-        if(self.loopy.tool==Loopy.TOOL_ERASE) return;
-        if(Key.space) return; // DON'T EDIT IF PANNING
+    // ONLY WHEN EDITING (and NOT erase)
+    if(self.loopy.mode!=Loopy.MODE_EDIT) return;
+    if(self.loopy.tool==Loopy.TOOL_ERASE) return;
+    if(Key.space) return; // DON'T EDIT IF PANNING
 
-        // Did you click on a node? If so, edit THAT node.
-        var clickedNode = self.getNodeByPoint(Mouse.x, Mouse.y);
-        if(clickedNode){
+    var isCtrlPressed = window._isCtrlPressedDuringClick || false;
+
+    // Did you click on a node?
+    var clickedNode = self.getNodeByPoint(Mouse.x, Mouse.y);
+    if(clickedNode){
+        // 1. Si es CTRL+Click: solo toggle, no abrir sidebar
+        if (isCtrlPressed) {
+            loopy.toggleSelected(clickedNode);
+            return; 
+        }
+        
+        // 2. Si el nodo YA ESTÁ seleccionado y hay más de 1 en total:
+        // NO deseleccionamos nada. Solo abrimos el sidebar para editar el grupo.
+        var isAlreadySelected = loopy.selectedNodes.indexOf(clickedNode) !== -1;
+        if (isAlreadySelected && loopy.selectedNodes.length > 1) {
             loopy.sidebar.edit(clickedNode);
             return;
         }
+        
+        // 3. Si es un click normal en un nodo que NO está seleccionado (o es el único):
+        // Comportamiento estándar: limpiamos todo, seleccionamos este y abrimos su sidebar.
+        loopy.deselectAll();
+        loopy.selectNode(clickedNode);
+        loopy.sidebar.edit(clickedNode);
+        return;
+    }
 
-        // Did you click on a label? If so, edit THAT label.
-        var clickedLabel = self.getLabelByPoint(Mouse.x, Mouse.y);
-        if(clickedLabel){
-            loopy.sidebar.edit(clickedLabel);
-            return;
-        }
+    // Did you click on a label?
+    var clickedLabel = self.getLabelByPoint(Mouse.x, Mouse.y);
+    if(clickedLabel){
+        loopy.deselectAll();
+        loopy.sidebar.edit(clickedLabel);
+        return;
+    }
 
-        // Did you click on an edge label? If so, edit THAT edge.
-        var clickedEdge = self.getEdgeByPoint(Mouse.x, Mouse.y);
-        if(clickedEdge){
-            loopy.sidebar.edit(clickedEdge);
-            return;
-        }
+    // Did you click on an edge?
+    var clickedEdge = self.getEdgeByPoint(Mouse.x, Mouse.y);
+    if(clickedEdge){
+        loopy.deselectAll();
+        loopy.sidebar.edit(clickedEdge);
+        return;
+    }
 
-        // If the tool LABEL? If so, TRY TO CREATE LABEL.
-        if(self.loopy.tool==Loopy.TOOL_LABEL){
-            loopy.label.tryMakingLabel();
-            return;
-        }
+    // Tool LABEL?
+    if(self.loopy.tool==Loopy.TOOL_LABEL){
+        loopy.deselectAll();
+        loopy.label.tryMakingLabel();
+        return;
+    }
 
-        // Otherwise, go to main Edit page.
-        loopy.sidebar.showPage("Edit");
+    // Click en canvas vacío
+    loopy.deselectAll();
+    loopy.sidebar.showPage("Edit");
 
-    };
+};
+
     subscribe("mouseclick", function(){
         if(window.innerWidth > 768){
             _editCallback();

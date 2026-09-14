@@ -15,15 +15,179 @@ function Sidebar(loopy){
         if(self.currentPage.target==object) self.showPage("Edit");
     });
 
-    // Node!
+    // Node! (CON SOPORTE MOLAR, MULTISELECCIÓN Y BOTÓN AGRUPAR)
     (function(){
         var page = new SidebarPage();
         page.addComponent(new ComponentButton({ header: true, label: "<b>volver al menú</b>", onclick: function(){ self.showPage("Edit"); } }));
+        
+        // 1. Nombre
         page.addComponent("label", new ComponentInput({ label: "<br><br>Nombre:", textarea: true }));
-        page.addComponent("hue", new ComponentSlider({ bg: "color", label: "Color:", options: [0,1,2,3,4,5,6,7], oninput: function(v){ Node.defaultHue=v; } }));
-        page.addComponent("shape", new ComponentChoices({ label: "Forma:", choices: [{label:"Círculo",value:"circle"},{label:"Cuadrado",value:"square"},{label:"Diamante",value:"diamond"}] }));
-        page.onedit = function(){ var n=page.target.label; if(n==""||n=="?") page.getComponent("label").select(); };
-        page.addComponent(new ComponentButton({ label: "Eliminar elemento", onclick: function(node){ node.kill(); self.showPage("Edit"); } }));
+        
+        // 2. Color
+        page.addComponent("hue", new ComponentSlider({ bg: "color", label: "Color:", options: [0,1,2,3,4,5,6,7], oninput: function(v){ 
+            if(loopy.selectedNodes && loopy.selectedNodes.length > 1) {
+                loopy.selectedNodes.forEach(function(n) { n.hue = v; });
+                publish("model/changed");
+            } else {
+                Node.defaultHue = v; 
+            }
+        } }));
+        
+        // 3. Forma
+        page.addComponent("shape", new ComponentChoices({ label: "Forma:", choices: [{label:"Círculo",value:"circle"},{label:"Cuadrado",value:"square"},{label:"Diamante",value:"diamond"}], oninput: function(v){
+            if(loopy.selectedNodes && loopy.selectedNodes.length > 1) {
+                loopy.selectedNodes.forEach(function(n) { n.shape = v; });
+                publish("model/changed");
+            }
+        } }));
+
+        // === 4. Botón Agrupar (Ubicado estratégicamente entre Forma y Eliminar) ===
+        var groupContainer = document.createElement("div");
+        groupContainer.id = "group-action-container";
+        groupContainer.style.display = "none";
+        groupContainer.style.marginTop = "15px";
+        groupContainer.style.marginBottom = "15px";
+        
+        var groupBtn = document.createElement("div");
+        groupBtn.className = "component_button";
+        groupBtn.style.background = "#222";
+        groupBtn.style.color = "white";
+        groupBtn.style.textAlign = "center";
+        groupBtn.innerHTML = "Agrupar selección (0)";
+        groupBtn.onclick = function() {
+            if(loopy.selectedNodes && loopy.selectedNodes.length >= 2) {
+                loopy.model.groupNodes(loopy.selectedNodes);
+                loopy.deselectAll();
+                self.showPage("Edit");
+            }
+        };
+        groupContainer.appendChild(groupBtn);
+        page.dom.appendChild(groupContainer); // Se agrega al final de lo que llevamos (después de Forma)
+        // ========================================================================
+
+        // 5. Contenedor dinámico para controles de Nodo Molar
+        var molarContainer = document.createElement("div");
+        molarContainer.id = "molar-controls";
+        molarContainer.style.display = "none";
+        molarContainer.style.marginTop = "15px";
+        molarContainer.style.borderTop = "1px solid #ccc";
+        molarContainer.style.paddingTop = "10px";
+        page.dom.appendChild(molarContainer);
+
+        // 6. Botón Eliminar (siempre al final, como acción destructiva final)
+        page.addComponent("deleteBtn", new ComponentButton({ label: "Eliminar elemento", onclick: function(node){ 
+            if(loopy.selectedNodes && loopy.selectedNodes.length > 1) {
+                loopy.selectedNodes.forEach(function(n) { n.kill(); });
+                loopy.deselectAll();
+            } else {
+                node.kill(); 
+            }
+            self.showPage("Edit"); 
+        } }));
+
+        // Lógica dinámica al editar un nodo
+        page.onedit = function(){ 
+            var n = page.target;
+            var isMulti = loopy.selectedNodes && loopy.selectedNodes.length > 1;
+            var isMolar = n && n.isMolar;
+
+            // Mostrar/ocultar botón Agrupar
+            var groupCont = document.getElementById("group-action-container");
+            if (groupCont) {
+                var groupBtnEl = groupCont.querySelector(".component_button");
+                if (isMulti) {
+                    groupCont.style.display = "block";
+                    groupBtnEl.innerHTML = "Agrupar selección (" + loopy.selectedNodes.length + ")";
+                } else {
+                    groupCont.style.display = "none";
+                }
+            }
+
+            var labelComp = page.getComponent("label");
+            var deleteComp = page.getComponent("deleteBtn");
+            
+            var inputEl = labelComp.dom.querySelector("input, textarea");
+            var deleteBtnEl = deleteComp.dom.querySelector(".component_button"); 
+
+            molarContainer.style.display = "none";
+            molarContainer.innerHTML = "";
+
+            if (isMulti) {
+                if(inputEl) {
+                    inputEl.disabled = true;
+                    inputEl.style.opacity = "0.5";
+                    inputEl.style.cursor = "not-allowed";
+                    inputEl.title = "No se puede renombrar varios nodos a la vez";
+                    inputEl.value = "(Varios nombres)";
+                }
+                if(deleteBtnEl) {
+                    deleteBtnEl.innerHTML = "Eliminar " + loopy.selectedNodes.length + " elementos";
+                    deleteBtnEl.style.background = ""; 
+                    deleteBtnEl.style.color = "";
+                }
+            } else if (isMolar) {
+                // --- ESTADO: NODO MOLAR ---
+                if(inputEl) {
+                    inputEl.disabled = false;
+                    inputEl.style.opacity = "1";
+                    inputEl.style.cursor = "text";
+                    inputEl.title = "";
+                }
+                if(deleteBtnEl) {
+                    deleteBtnEl.innerHTML = "Eliminar grupo"; // CAMBIO 1: Texto más corto y claro
+                    deleteBtnEl.style.background = "#EA3E3E";
+                    deleteBtnEl.style.color = "white";
+                }
+
+                molarContainer.style.display = "block";
+                var listHtml = "<div class='component_label' style='margin-bottom:8px;'>Elementos agrupados:</div>";
+
+                if(n.children && n.children.length > 0) {
+                    n.children.forEach(function(childId) {
+                        var childNode = loopy.model.getNode(childId);
+                        if(childNode) {
+                            listHtml += "<div style='display:flex; justify-content:space-between; align-items:center; margin-bottom:6px; padding:6px; background:#f9f9f9; border-radius:4px; border:1px solid #eee;'>";
+                            listHtml += "<span style='font-size:0.9em; color:#333; word-break:break-word; flex:1;'>" + childNode.label + "</span>";
+                            
+                            // CAMBIO 2: Quitamos font-weight:bold y agregamos width:auto !important para que no se aplaste
+                            listHtml += "<div class='component_button' style='background:#EA3E3E; color:white; padding:4px 8px; font-size:0.8em; margin-left:8px; cursor:pointer; flex:none; width:auto !important; min-width:24px; text-align:center;' onclick='loopy.model.removeNodeFromGroup(loopy.model.getNode(" + n.id + "), loopy.model.getNode(" + childId + ")); setTimeout(function(){ loopy.sidebar.edit(loopy.model.getNode(" + n.id + ")); }, 50);'>X</div>";
+                            
+                            listHtml += "</div>";
+                        }
+                    });
+                } else {
+                    listHtml += "<div style='font-size:0.9em; color:#888; font-style:italic; margin-bottom:10px;'>Sin elementos agrupados.</div>";
+                }
+
+                listHtml += "<div style='text-align:center; margin-top:12px;'>";
+                
+                // CAMBIO 3: Quitamos width:100% y font-weight:bold, agregamos padding para tamaño normal
+                listHtml += "<div class='component_button' style='background:#888; color:white; cursor:pointer; width:auto; padding: 6px 12px;' onclick='loopy.model.ungroupNode(loopy.model.getNode(" + n.id + ")); loopy.sidebar.showPage(\"Edit\");'>Desagrupar todo</div>";
+                
+                listHtml += "</div>";
+
+                molarContainer.innerHTML = listHtml;
+
+            } else {
+                // --- ESTADO: NODO NORMAL ---
+                if(inputEl) {
+                    inputEl.disabled = false;
+                    inputEl.style.opacity = "1";
+                    inputEl.style.cursor = "text";
+                    inputEl.title = "";
+                }
+                if(deleteBtnEl) {
+                    deleteBtnEl.innerHTML = "Eliminar elemento";
+                    deleteBtnEl.style.background = ""; 
+                    deleteBtnEl.style.color = "";
+                }
+            }
+
+            if(n && (n.label=="" || n.label=="?") && !isMulti) {
+                labelComp.select(); 
+            }
+        };
+        
         self.addPage("Node", page);
     })();
 
@@ -48,7 +212,7 @@ function Sidebar(loopy){
         self.addPage("Label", page);
     })();
 
-    // Edit (LAYOUT LIMPIO Y DEFINITIVO)
+            //     // Edit (MENÚ PRINCIPAL - limpio y original)
     (function(){
         var page = new SidebarPage();
         page.addComponent(new ComponentHTML({
@@ -57,9 +221,6 @@ function Sidebar(loopy){
             "<span class='mini_button' onclick='publish(\"model/new/confirm\")'>crear nueva red</span> "+
             "<span class='mini_button' onclick='publish(\"modal\",[\"howto\"])'>tutorial</span><br><br>"+
             "<span class='mini_button' id='centrality_button' onclick='publish(\"centrality/toggle\")'>analizar centralidad</span><br><br>"+
-            
-            "<div style='font-size:0.9em; margin-bottom:5px; color:#555;'>Cantidad de simulaciones: <strong id='nira-sim-val'>100</strong></div>"+
-            "<input type='range' id='nira-simulaciones' min='50' max='1000' step='50' value='100' style='width:250px; margin-bottom:15px; cursor:ew-resize;'><br>"+
             "<span class='mini_button' id='nira_button' onclick='publish(\"nira/analyze\")' style='display:block; width:250px; text-align:center; margin-bottom:15px;'>analizar intervenciones (NIRA)</span>"+
             
             "<div id='nira-ranking'></div>"+
@@ -69,10 +230,10 @@ function Sidebar(loopy){
             "<span class='mini_button' onclick='publish(\"save/png\")'>guardar como imagen (.png)</span> <br><br>"+
             "<span class='mini_button' onclick='publish(\"import/file\")'>cargar archivo</span> <br><br>"+
             "<span class='mini_button' onclick='publish(\"modal\",[\"embed\"])'>insertar en tu página web</span> <br><br>"+
-"<hr/>"+
-"<span style='font-size:0.85em; color:#666; line-height:1.4;'>"+
-"Adaptación de <a target='_blank' href='https://ncase.me/loopy/' style='color:#555;'>LOOPY</a> (original de Nicky Case) realizada por Lic. Mathias Nicolás Rojas de la Fuente."+
-"</span>"
+            "<hr/>"+
+            "<span style='font-size:0.85em; color:#666; line-height:1.4;'>"+
+            "Adaptación de <a target='_blank' href='https://ncase.me/loopy/' style='color:#555;'>LOOPY</a> (original de Nicky Case) realizada por Lic. Mathias Nicolás Rojas de la Fuente."+
+            "</span>"
         }));
         self.addPage("Edit", page);
     })();
@@ -125,7 +286,7 @@ function Sidebar(loopy){
         var container = _initNiraUI();
         if(!container) return;
 
-        var simulaciones = parseInt(document.getElementById("nira-simulaciones").value) || 100;
+        var simulaciones = 1000;
         var currentHash = loopy.getModelHash();
 
         document.getElementById("nira_button").setAttribute("active","yes");
@@ -473,6 +634,40 @@ doc.text("¹", 14 + titleWidth + 1, 16);
     
     doc.save("informe-estabilidad-nira.pdf");
 });
+
+    // ==========================================
+    // MOLAR: Actualizar la UI del sidebar cuando cambia la selección
+    // ==========================================
+    subscribe("selection/changed", function(selected) {
+        if (!selected) selected = [];
+        
+        // === NUEVO: Protección de rendimiento ===
+        // Si hay 2 o más nodos seleccionados y la centralidad está activa, la desactivamos.
+        if (selected.length >= 2 && loopy.showCentrality) {
+            loopy.showCentrality = false;
+            var centralityBtn = document.getElementById("centrality_button");
+            if (centralityBtn) {
+                centralityBtn.removeAttribute("active"); // Quita el resaltado visual del botón
+            }
+            publish("model/changed"); // Actualiza el canvas para quitar los auras de centralidad
+        }
+        // ========================================
+
+        if (selected.length >= 1) {
+            // Hay al menos un nodo: mostrar su sidebar
+            var targetNode = selected[0];
+            if (self.currentPage.id !== "Node" || self.currentPage.target !== targetNode) {
+                self.edit(targetNode);
+            } else {
+                self.currentPage.onedit();
+            }
+        } else {
+            // No hay nodos: volver al menú
+            if (self.currentPage.id !== "Edit") {
+                self.showPage("Edit");
+            }
+        }
+    });
 
 } // <--- CIERRE DE Sidebar(loopy)
 

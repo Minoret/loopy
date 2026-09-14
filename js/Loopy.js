@@ -56,6 +56,45 @@ function Loopy(config){
     // Centrality
     self.showCentrality = false;
 
+    // ==========================================
+    // MOLAR: Estado de Selección Múltiple
+    // ==========================================
+    self.selectedNodes = [];
+
+    self.selectNode = function(node) {
+        if (self.selectedNodes.indexOf(node) === -1) {
+            self.selectedNodes.push(node);
+            publish("selection/changed", self.selectedNodes);
+            publish("model/changed");
+        }
+    };
+
+    self.toggleSelected = function(node) {
+        var index = self.selectedNodes.indexOf(node);
+        if (index === -1) {
+            self.selectedNodes.push(node);
+        } else {
+            self.selectedNodes.splice(index, 1);
+        }
+        publish("selection/changed", self.selectedNodes);
+	publish("model/changed");
+    };
+
+    self.deselectAll = function() {
+        if (self.selectedNodes.length > 0) {
+            self.selectedNodes = [];
+            publish("selection/changed", self.selectedNodes);
+	    publish("model/changed");
+        }
+    };
+    
+    self.clearSelectionOnModelReset = function() {
+        self.deselectAll();
+    };
+    subscribe("model/reset", self.clearSelectionOnModelReset);
+    subscribe("model/new", self.clearSelectionOnModelReset);
+    // ==========================================
+
     // NIRA: impacto y estado de análisis
     self.showImpact = false;     // pinta auras de impacto en los nodos
     self._niraRunning = false;   // true mientras corre un análisis
