@@ -53,6 +53,9 @@ function Node(model, config){
     // Centrality
     self.centrality = 0;
 
+    // Impact (NIRA): 0..1, proporcional al impacto de intervención
+    self.impact = 0;
+
     // Value: from 0 to 1
     self.value = self.init;
     // TODO: ACTUALLY VISUALIZE AN INFINITE RANGE
@@ -72,6 +75,8 @@ function Node(model, config){
 
         // ONLY WHEN PLAYING
         if(self.loopy.mode!=Loopy.MODE_PLAY) return;
+        // NIRA: no mostrar controles de edición durante el análisis
+        if(self.loopy._niraRunning) return;
 
         // If moused over this, show it, or not.
         _controlsSelected = self.isPointInNode(Mouse.x, Mouse.y);
@@ -88,6 +93,7 @@ function Node(model, config){
     var _listenerMouseDown = subscribe("mousedown",function(){
 
         if(self.loopy.mode!=Loopy.MODE_PLAY) return; // ONLY WHEN PLAYING
+        if(self.loopy._niraRunning) return; // NIRA: sin edición durante el análisis
         if(_controlsSelected) _controlsPressed = true;
 
         // IF YOU CLICKED ME...
@@ -108,9 +114,16 @@ function Node(model, config){
     var _listenerMouseUp = subscribe("mouseup",function(){
         _controlsPressed = false;
     });
-    var _listenerReset = subscribe("model/reset", function(){
-        self.value = self.init;
-    });
+var _listenerReset = subscribe("model/reset", function(){
+    self.value = self.init;
+
+    // Limpiar agregación pendiente
+    if(self.aggregate){
+        clearTimeout(self.aggregate);
+        self.aggregate = null;
+    }
+    self.deltaPool = 0;
+});
     var _listenerMode = subscribe("loopy/mode", function(){
         _controlsVisible = false;
         _controlsAlpha = 0;
@@ -132,15 +145,52 @@ function Node(model, config){
             myEdges[i].addSignal(signal);
         }
     };
-    
+
+    // Agregación: acumula señales entrantes y emite UNA sola por ráfaga.
+    // Latencia en segundos. 0 = sin agregación.
+    self.aggregationLatency = 0.1;
+    self.deltaPool = 0;
+    self.aggregate = null;
+
     self.takeSignal = function(signal){
-        self.value += signal.delta;
-        self.bound();
-        self.sendSignal({ delta: self.value * 0.3 });
-        if(signal.delta !== 0){  // ← guardia anti-NaN
+
+        // Animación visual (siempre)
+        if(signal.delta !== 0){
             _offsetVel -= 6 * (signal.delta / Math.abs(signal.delta));
         }
+
+        // Acumular en el pool
+        self.deltaPool += signal.delta;
+
+        // Actualizar value inmediatamente → el círculo crece con cada señal
+        self.value += signal.delta;
+        self.bound();
+
+        // Si ya hay un timeout pendiente, solo acumulamos y salimos
+        if(self.aggregate) return;
+
+        var myAge = signal.age;
+        self.aggregate = setTimeout(function(){
+            // Solo emitir si seguimos en PLAY
+            if(self.loopy.mode === Loopy.MODE_PLAY){
+                self.sendSignal({
+                    delta: self.value * 0.3,   // ← value, no deltaPool
+                    age: myAge
+                });
+            }
+            self.deltaPool = 0;
+            self.aggregate = null;
+        }, self.aggregationLatency * 1000);
     };
+
+    // Limpiar agregación pendiente en reset
+    var _listenerReset = subscribe("model/reset", function(){
+        if(self.aggregate){
+            clearTimeout(self.aggregate);
+            self.aggregate = null;
+        }
+        self.deltaPool = 0;
+    });
 
     //////////////////////////////////////
     // UPDATE & DRAW /////////////////////
@@ -241,6 +291,25 @@ function Node(model, config){
             ctx.beginPath();
             ctx.arc(0, 0, haloSize, 0, Math.TAU, false);
             ctx.fillStyle = gradient;
+            ctx.fill();
+        }
+
+        // IMPACT HALO (NIRA)
+        // Aura plana del color propio del nodo, proporcional a su impacto.
+        // Se pinta antes de la burbuja blanca y coexiste con el halo de
+        // centralidad (tiene prioridad visual si showImpact está activo).
+        if(self.loopy.showImpact && self.impact > 0){
+            var impactRatio = self.impact; // 0..1 (normalizado en NIRA)
+            var impactHaloSize = r * (1.4 + impactRatio * 0.8);
+            var impactHex = color.replace('#', '');
+            var impactR = parseInt(impactHex.substring(0, 2), 16);
+            var impactG = parseInt(impactHex.substring(2, 4), 16);
+            var impactB = parseInt(impactHex.substring(4, 6), 16);
+            var impactAlpha = 0.15 + impactRatio * 0.20;
+
+            ctx.beginPath();
+            self.getPath(ctx, impactHaloSize);
+            ctx.fillStyle = "rgba(" + impactR + "," + impactG + "," + impactB + "," + impactAlpha.toFixed(2) + ")";
             ctx.fill();
         }
 

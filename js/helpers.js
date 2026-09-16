@@ -1,4 +1,24 @@
 /*****************************
+PUBLISH / SUBSCRIBE (Event System)
+*****************************/
+var _subscriptions = {};
+
+function publish(topic, args){
+    var subs = _subscriptions[topic];
+    if(!subs) return;
+    for(var i=0; i<subs.length; i++){
+        subs[i](args);
+    }
+}
+
+function subscribe(topic, fn){
+    if(!_subscriptions[topic]){
+        _subscriptions[topic] = [];
+    }
+    _subscriptions[topic].push(fn);
+}
+
+/*****************************
 
 A miscellaneous collection of reuseable helper methods
 that I couldn't be arsed to put into separate classes

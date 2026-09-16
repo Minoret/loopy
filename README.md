@@ -77,6 +77,7 @@ Esta versión, **LOOPY.ESP**, es una adaptación profesional del [LOOPY original
 ### Análisis
 - **Activar Grilla Clínico**: Haz clic en el botón de grilla (esquina inferior derecha) para mostrar/ocultar la cuadrícula 3x3
 - **Analizar Centralidad**: Haz clic en "analizar centralidad" en el panel lateral para ver el mapa de calor de nodos
+- **Analizar Intervenciones (NIRA)**: NIRA permite identificar qué nodo, al ser intervenido, produce el mayor efecto cascada en el resto del sistema. Haz clic en "analizar intervenciones (NIRA)" en el panel lateral: verás el ranking de impacto en el resto del sistema (derrame) con auras en los 5 nodos de mayor impacto
 
 ### Guardar y Compartir
 - **Guardar como Link**: Genera URL con datos del modelo codificados

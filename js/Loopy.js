@@ -56,6 +56,16 @@ function Loopy(config){
     // Centrality
     self.showCentrality = false;
 
+    // NIRA: impacto y estado de análisis
+    self.showImpact = false;     // pinta auras de impacto en los nodos
+    self._niraRunning = false;   // true mientras corre un análisis
+    
+    self.niraCache = {
+        hash: null,
+        simulaciones: 0,
+        results: null
+    };
+    
     // Tools
     self.toolbar = new Toolbar(self);
     self.tool = Loopy.TOOL_INK;
@@ -156,6 +166,8 @@ function Loopy(config){
     var _serverAutosaveTimeout = null;
     subscribe("model/changed", function(){
         if(!self.embedded) self.dirty = true;
+        self.invalidateNiraCache(); 
+        
         if(!self.embedded){
 
             // Local autosave
@@ -465,6 +477,29 @@ function Loopy(config){
         }
     };
 
+        // ==========================================
+    // NIRA: Funciones de Caché
+    // ==========================================
+    self.getModelHash = function() {
+        var model = self.model;
+        var nodes = model.nodes.map(function(n) {
+            return { id: n.id, label: n.label, init: n.init };
+        }).sort(function(a, b) { return a.id - b.id; });
+
+        var edges = model.edges.map(function(e) {
+            return { from: e.from.id, to: e.to.id, signal: e.signal };
+        }).sort(function(a, b) {
+            return (a.from - b.from) || (a.to - b.to);
+        });
+
+        return JSON.stringify({ nodes: nodes, edges: edges });
+    };
+
+    self.invalidateNiraCache = function() {
+        self.niraCache.hash = null;
+        self.niraCache.results = null;
+    };
+    
     ///////////////////////////
     //////// EMBEDDED? ////////
     ///////////////////////////

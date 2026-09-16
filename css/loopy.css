@@ -1,18 +1,15 @@
 body{
     margin:0;
     background: #fff;
-
     font-family: 'Figtree', sans-serif;
     font-weight: normal;
     font-size: 20px;
-
     overflow: hidden;
 }
 canvas{
     position:absolute;
     top:0; left:0;
 }
-
 #canvasses{
     position:absolute;
     top:0; left:0;
@@ -35,28 +32,22 @@ canvas{
 #canvasses[cursor=label]{
     cursor: url('cursors/label.png') 15 15, auto;
 }
-
-
-
 /**********
- PLAY CONTROLS
+PLAY CONTROLS
 **********/
-
 #playbar{
     position: absolute;
     bottom: 15px;
-    left: calc(50% - 275px); /* 50% - half of (playbar width + sidebar width)*/
-
+    left: calc(50% - 275px);
     width: 250px;
     height: 75px;
-
     -webkit-user-select: none;
     -moz-user-select: none;
     -ms-user-select: none;
     user-select: none;
 }
 #playbar[fullscreen=yes]{
-    left: calc(50% - 125px); /* 50% - half of (playbar width)*/
+    left: calc(50% - 125px);
 }
 #playbar .component_button{
     position: absolute;
@@ -101,22 +92,16 @@ div[big=yes] .play_button_label{
     font-size: 28px;
     height: 35px;
 }
-
-
-
 /**********
- TOOLBAR 
+TOOLBAR
 **********/
-
 #toolbar{
     position: absolute;
     left: 0px;
-    top: calc(33% - 142.5px); /* 33% - half of toolbar height */
-
+    top: calc(33% - 142.5px);
     width:75px; height:280px;
     padding: 5px;
     background-color: #ddd;
-
     -webkit-user-select: none;
     -moz-user-select: none;
     -ms-user-select: none;
@@ -125,7 +110,6 @@ div[big=yes] .play_button_label{
 #toolbar[mode=play]{
     display: none;
 }
-
 .toolbar_button{
     width:60px; height:60px;
     margin: 5px;
@@ -137,21 +121,17 @@ div[big=yes] .play_button_label{
     border: 2px solid #888;
     background-color: #999;
 }
-
 /**********
- SIDEBAR 
+SIDEBAR
 **********/
-
 #sidebar{
     position: absolute;
     top:0; right:0;
     width: 300px;
     height: 100%;
     background: #ddd;
-
     font-weight: 100;
     font-size: 17px;
-
     -webkit-user-select: none;
     -moz-user-select: none;
     -ms-user-select: none;
@@ -173,7 +153,6 @@ div[big=yes] .play_button_label{
     padding: 3px 5px;
     border-radius: 2px;
     font-size: 16px;
-
     cursor: pointer;
 }
 #sidebar .mini_button:hover{
@@ -181,6 +160,63 @@ div[big=yes] .play_button_label{
 }
 #sidebar .mini_button[active=yes]{
     background: #EA3E3E;
+}
+/* NIRA: barra de progreso y ranking */
+#sidebar #nira-ranking{
+    width: 250px;
+    max-width: 100%;
+    margin: 6px 0;
+    margin-top: 8px;
+    border-top: 1px solid #ddd;
+    max-height: 190px;
+    overflow-y: auto;
+    font-size: 14px;
+}
+#sidebar #nira-ranking .nira-progress{
+    width: 100%;
+    height: 10px;
+    background: rgba(150,150,150,0.3);
+    border-radius: 5px;
+    overflow: hidden;
+    margin-bottom: 6px;
+}
+#sidebar #nira-ranking .nira-progress-fill{
+    height: 100%;
+    width: 0%;
+    background: #EA3E3E;
+    border-radius: 5px;
+    transition: width 0.15s ease;
+}
+#sidebar #nira-ranking .nira-status{
+    color: #555;
+    margin-bottom: 6px;
+    min-height: 20px;
+}
+#sidebar #nira-ranking ol{
+    margin: 0;
+    padding-left: 20px;
+}
+#sidebar #nira-ranking li{
+    margin-bottom: 3px;
+    line-height: 1.4;
+}
+#sidebar #nira-ranking .nira-dot{
+    display: inline-block;
+    width: 10px;
+    height: 10px;
+    border-radius: 50%;
+    margin-right: 6px;
+}
+#sidebar #nira-ranking .nira-label{
+    color: #444;
+}
+#sidebar #nira-ranking .nira-value{
+    color: #111;
+    font-weight: 700;
+    float: right;
+}
+#sidebar #nira-ranking .nira-actions{
+    margin-top: 8px;
 }
 #sidebar[mode=play] .mini_button{
     background: #555;
@@ -201,11 +237,9 @@ div[big=yes] .play_button_label{
 }
 .component_input{
     border: none;
-    
     width:calc(100% - 10px);
     height:22px;
     padding: 5px;
-    
     font-size: 20px;
     font-weight: 100;
 }
@@ -259,7 +293,6 @@ div[big=yes] .play_button_label{
     margin-bottom: 5px;
 }
 .component_button{
-
     width: calc(100% - 20px);
     background: #888;
     color: #fff;
@@ -268,7 +301,6 @@ div[big=yes] .play_button_label{
     text-align: center;
     padding: 10px;
     border-radius: 5px;
-
     cursor: pointer;
 }
 .modal_actions {
@@ -279,14 +311,12 @@ div[big=yes] .play_button_label{
     gap: 12px;
     margin-top: 24px;
 }
-
 .modal_actions .component_button {
     flex: 0 1 auto;
     width: auto;
     min-width: 140px;
     text-align: center;
 }
-
 @media (max-width: 480px) {
     .modal_actions {
         flex-direction: column;
@@ -306,7 +336,6 @@ div[big=yes] .play_button_label{
 .component_button[header=yes]:hover{
     background: #333;
 }
-
 .component_choices {
     display: flex;
     justify-content: space-between;
@@ -329,20 +358,13 @@ div[big=yes] .play_button_label{
 .component_choice[active=yes] {
     background: #EA3E3E;
 }
-
-
-
 /**********
-
 MODAL
-
 **********/
-
 #modal_container{
     display: none;
     position: absolute;
     width: 100%; height: 100%;
-
     -webkit-user-select: none;
     -moz-user-select: none;
     -ms-user-select: none;
@@ -357,11 +379,9 @@ MODAL
     background: rgba(0,0,0,0.8);
 }
 #modal{
-
     position: absolute;
     top:0; left:0; right:0; bottom:0;
     margin: auto;
-
     width: 600px; height: 300px;
     padding: 10px;
     background: #ddd;
@@ -384,11 +404,9 @@ MODAL
 #modal iframe{
     border: none;
 }
-
 /**********
- GRID OVERLAY
+GRID OVERLAY
 **********/
-
 #grid-overlay {
     position: absolute;
     top: 0;
@@ -402,11 +420,9 @@ MODAL
     pointer-events: none;
     z-index: 0;
 }
-
 #grid-overlay.show {
     display: grid;
 }
-
 .grid-cell {
     border: 1px dashed #ccc;
     display: flex;
@@ -423,32 +439,27 @@ MODAL
     overflow: hidden;
     word-break: break-word;
 }
-
-/* Mobile responsive grid */
 @media (max-width: 768px) {
     .grid-cell {
         font-size: clamp(8px, 3vw, 16px);
         padding: 5px;
     }
 }
-
 @media (max-width: 480px) {
     .grid-cell {
         font-size: clamp(7px, 2.5vw, 12px);
         padding: 4px;
     }
 }
-
 #extra-buttons {
     position: fixed;
-    bottom: 200px;
-    right: 20px;
+    bottom: 5px;
+    right: 305px;
     display: flex;
     flex-direction: row;
-    gap: 15px;
+    gap: 10px;
     z-index: 1000;
 }
-
 #grid-toggle {
     position: relative;
     width: 50px;
@@ -464,11 +475,9 @@ MODAL
     justify-content: center;
     transition: background 0.3s;
 }
-
 #grid-toggle:hover {
     background: #444;
 }
-
 #sidebar-toggle {
     position: fixed;
     top: 20px;
@@ -481,17 +490,15 @@ MODAL
     border: none;
     cursor: pointer;
     box-shadow: 0 2px 6px rgba(0,0,0,0.3);
-    display: none; /* Only show on mobile */
+    display: none;
     align-items: center;
     justify-content: center;
     transition: background 0.3s;
     z-index: 1002;
 }
-
 #sidebar-toggle:hover {
     background: #444;
 }
-
 #recenter-button {
     position: relative;
     width: 50px;
@@ -507,16 +514,13 @@ MODAL
     justify-content: center;
     transition: background 0.3s;
 }
-
 #recenter-button:hover {
     background: #E6E6E6;
 }
-
 @media (max-width: 768px) {
     #canvasses {
         width: 100% !important;
     }
-
     #sidebar {
         position: fixed;
         width: 300px;
@@ -525,33 +529,27 @@ MODAL
         transition: transform 0.3s ease;
         box-shadow: -2px 0 10px rgba(0,0,0,0.1);
     }
-
     #sidebar.show {
         transform: translateX(0);
     }
-
     #sidebar-toggle {
         display: flex;
     }
-
     #playbar {
         left: 50% !important;
         transform: translateX(-50%);
-        bottom: 80px; /* Avoid overlap with grid toggle and logo */
+        bottom: 80px;
         width: 250px !important;
         height: auto !important;
     }
-
     #playbar[fullscreen=yes] {
         left: 50% !important;
         transform: translateX(-50%);
     }
-
     #playbar .play_button_label, #playbar .play_button_icon {
         display: inline-block !important;
         vertical-align: middle !important;
     }
-
     #playbar .component_button {
         width: auto !important;
         height: 45px !important;
@@ -564,36 +562,29 @@ MODAL
         font-size: 16px !important;
         gap: 6px !important;
     }
-
     #playbar .component_button[big=yes] {
         font-size: 20px !important;
     }
-
     #playbar > div {
         display: none;
         flex-wrap: wrap !important;
         justify-content: center !important;
         align-items: center !important;
     }
-
     #playbar > div.visible {
         display: flex !important;
     }
-
-    /* PlaySlider container */
     #playbar > div > div:not(.component_button) {
         width: 100% !important;
         position: relative !important;
         margin-top: 10px !important;
         height: 30px !important;
     }
-
     #playbar .play_slider {
         width: calc(100% - 60px) !important;
         left: 30px !important;
         position: absolute !important;
     }
-
     #toolbar {
         top: 20px;
         left: 10px;
@@ -601,13 +592,11 @@ MODAL
         padding: 2px;
         width: 65px;
     }
-    
     .toolbar_button {
         width: 50px;
         height: 50px;
         margin: 5px auto;
     }
-
     #modal {
         width: 90% !important;
         height: auto !important;
@@ -620,37 +609,31 @@ MODAL
         transform: translateY(-50%);
         overflow-y: auto;
     }
-
     #modal iframe {
         width: 100% !important;
         height: 400px !important;
     }
-
     #modal_page div, #modal_page iframe {
         float: none !important;
         width: 100% !important;
     }
-
     #sidebar .mini_button {
-        padding: 8px 12px; /* Larger touch targets */
+        padding: 8px 12px;
         margin-bottom: 5px;
         display: inline-block;
     }
-    
     #extra-buttons {
         bottom: 20px;
         right: auto;
         left: 20px;
     }
 }
-
-/* Button tags - temporary labels for grid-toggle and recenter-button */
 .button-tag {
     position: absolute;
-    bottom: 60px;
+    bottom: 54px;
     left: 50%;
     transform: translateX(-50%);
-    background: #4a90e2;
+    background: #6D8C3A;
     color: white;
     padding: 4px 8px;
     border-radius: 4px;
@@ -661,7 +644,6 @@ MODAL
     box-shadow: 0 2px 4px rgba(0,0,0,0.2);
     z-index: 1001;
 }
-
 @media (pointer: coarse) {
     [data-balloon]::before,
     [data-balloon]::after {
@@ -670,14 +652,10 @@ MODAL
         transition: none !important;
     }
 }
-
-/* Ocultar botones de UI en embed */
 .embed-mode #extra-buttons,
 .embed-mode #sidebar-toggle {
     display: none !important;
 }
-
-/* Logo más pequeño y reposicionado en embed */
 .embed-mode .contexto-link {
     bottom: 10px;
     right: 10px;
@@ -685,7 +663,147 @@ MODAL
 .embed-mode .contexto-link img {
     height: 30px;
 }
-
 .embed-mode #playbar {
     bottom: 15px !important;
+}
+
+/* ==========================================
+   NIRA: Diseño Compacto y Profesional
+   ========================================== */
+#sidebar #nira-ranking .nira-controls-row {
+    display: flex;
+    align-items: center;
+    margin-bottom: 8px;
+    padding: 4px 0;
+    border-bottom: 1px solid #eee;
+    padding-bottom: 8px;
+}
+
+#sidebar #nira-ranking .nira-controls-left {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    position: relative;
+}
+
+#sidebar #nira-ranking .nira-toggle-arrow {
+    cursor: pointer;
+    font-size: 1.1em;
+    font-weight: bold;
+    color: #EA3E3E;
+    user-select: none;
+    transition: transform 0.2s;
+}
+
+#sidebar #nira-ranking .nira-title {
+    font-weight: 600;
+    font-size: 0.95em;
+    color: #333;
+}
+
+/* ==========================================
+   NIRA: Popover de ayuda interactivo (FIXED)
+   ========================================== */
+#sidebar #nira-ranking .nira-help-icon {
+    position: relative;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 18px;
+    height: 18px;
+    border-radius: 50%;
+    background: #999;
+    color: white;
+    font-size: 12px;
+    font-weight: bold;
+    font-family: sans-serif;
+    cursor: pointer;
+    margin-left: 4px;
+    vertical-align: middle;
+    transition: background 0.2s;
+}
+
+#sidebar #nira-ranking .nira-help-icon:hover {
+    background: #EA3E3E;
+}
+
+/* POPOVER AHORA ES FIXED (se posiciona respecto a la pantalla) */
+#sidebar #nira-ranking .nira-help-popover {
+    display: none;
+    position: fixed; /* <-- CAMBIO CLAVE */
+    z-index: 10000;
+    background: #fff;
+    border: 1px solid #ccc;
+    border-radius: 6px;
+    padding: 12px 14px;
+    width: 210px;
+    font-size: 12px;
+    line-height: 1.5;
+    color: #444;
+    box-shadow: 0 6px 16px rgba(0,0,0,0.2);
+    text-align: left;
+    pointer-events: auto;
+}
+
+/* Flechita hacia arriba (apunta al icono) */
+#sidebar #nira-ranking .nira-help-popover::before {
+    content: "";
+    position: absolute;
+    bottom: 100%; /* Arriba del popover */
+    left: 102px;
+    border-width: 6px;
+    border-style: solid;
+    border-color: transparent transparent #ccc transparent;
+}
+
+#sidebar #nira-ranking .nira-help-popover::after {
+    content: "";
+    position: absolute;
+    bottom: 100%;
+    left: 102px;
+    border-width: 5px;
+    border-style: solid;
+    border-color: transparent transparent #fff transparent;
+}
+
+#sidebar #nira-ranking .nira-help-popover.show {
+    display: block;
+}
+
+#sidebar #nira-ranking .nira-controls-right {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    margin-left: 30px; /* <-- AGREGAR ESTA LÍNEA */
+
+}
+
+#sidebar #nira-ranking .nira-aura-toggle {
+    cursor: pointer;
+    font-size: 1.4em;
+    color: #EA3E3E;
+    user-select: none;
+    line-height: 1;
+    transition: opacity 0.2s;
+}
+
+#sidebar #nira-ranking .nira-aura-toggle:hover {
+    opacity: 0.7;
+}
+
+#sidebar #nira-ranking .nira-pdf-btn {
+    font-size: 0.8em !important;
+    padding: 2px 8px !important;
+    margin: 0 !important;
+}
+
+#sidebar #nira-ranking .nira-results-list {
+    margin: 0;
+    padding-left: 20px;
+    transition: all 0.2s ease;
+}
+
+#sidebar #nira-ranking .nira-results-list li {
+    margin-bottom: 4px;
+    line-height: 1.4;
 }
