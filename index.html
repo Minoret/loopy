@@ -1,0 +1,247 @@
+<!doctype html>
+<html>
+<head>
+    
+    <!-- META -->
+    <title>LOOPY.ESP (v2)</title>
+    <meta content="text/html;charset=utf-8" http-equiv="Content-Type">
+    <meta content="utf-8" http-equiv="encoding">
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <link rel="icon" type="image/png" href="favicon.png">
+
+    <!-- Google Fonts - Figtree -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Figtree:wght@300;400;700&display=swap" rel="stylesheet">
+
+    <!-- Schema.org markup for Google+ -->
+    <meta itemprop="name" content="LOOPY! Español">
+    <meta itemprop="description" content="Una herramienta para pensar en sistemas">
+    <meta itemprop="image" content="http://ncase.me/loopy/social/thumbnail.png">
+
+    <!-- Twitter Card data: SMALL -->
+    <meta name="twitter:card" content="summary"/>
+    <meta name="twitter:site" content="@ncasenmare"/>
+    <meta name="twitter:title" content="LOOPY! Español"/>
+    <meta name="twitter:description" content="una herramienta para pensar en sistemas"/>
+    <meta name="twitter:creator" content="@ncasenmare">
+    <meta name="twitter:image" content="http://ncase.me/loopy/social/thumbnail_small.png"/>
+
+    <!-- Open Graph data -->
+    <meta property="og:title" content="LOOPY! Español">
+    <meta property="og:type" content="website">
+    <meta property="og:url" content="http://ncase.me/loopy/">
+    <meta property="og:image" content="http://ncase.me/loopy/social/thumbnail.png">
+    <meta property="og:description" content="una herramienta para pensar en sistemas">
+
+    <!-- Styles! -->
+    <link href="css/loopy.css" rel="stylesheet"/>
+    <link href="css/balloon.css" rel="stylesheet"/>
+
+    <!-- Custom Style for button -->
+    <style>
+        .contexto-link {
+            position: fixed;
+            bottom: 20px;
+            right: 20px;
+            text-decoration: none;
+            z-index: 1000;
+            mix-blend-mode: difference;
+        }
+        .contexto-link img {
+            display: block;
+            height: 60px;
+        }
+        @media (max-width: 768px) {
+            .contexto-link {
+                bottom: 10px;
+                right: 10px;
+            }
+            .contexto-link img {
+                height: 60px;
+            }
+        }
+    </style>
+    
+    <!-- Librerías para generación de PDF -->
+   <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+   <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.5.31/jspdf.plugin.autotable.min.js"></script>
+
+</head>
+<body style="opacity:0">
+
+    <!-- Loopy & Ink -->
+    <div id="canvasses">
+        <div id="grid-overlay">
+            <div class="grid-cell">Atención</div>
+            <div class="grid-cell">Cognición</div>
+            <div class="grid-cell">Self</div>
+            <div class="grid-cell">Afecto</div>
+            <div class="grid-cell">Conducta</div>
+            <div class="grid-cell">Motivación</div>
+            <div class="grid-cell">Biofisiológico</div>
+            <div class="grid-cell">Contexto</div>
+            <div class="grid-cell">Sociocultural</div>
+        </div>
+    </div>
+
+    <!-- Extra Buttons (Centrar & MMEE) -->
+    <div id="extra-buttons">
+        <!-- Recenter Button -->
+        <button id="recenter-button" title="Centrar Vista">
+            <span class="button-tag">Centrar</span>
+            <img src="https://images.icon-icons.com/1863/PNG/512/center-focus-strong_119304.png" alt="Centrar" style="width:24px;height:24px;">
+        </button>
+
+        <!-- Grid Toggle Button -->
+        <button id="grid-toggle" title="MetaModelo Evolutivo Extendido (MMEE)">
+            <span class="button-tag">MMEE</span>
+            <img src="https://img.icons8.com/material-outlined/24/ffffff/grid.png" alt="Grilla" style="width:24px;height:24px;">
+        </button>
+    </div>
+
+    <!-- Sidebar Toggle Button -->
+    <button id="sidebar-toggle" title="Alternar Menú">
+        <img src="https://img.icons8.com/material-outlined/24/ffffff/menu--v1.png" alt="Menú" style="width:24px;height:24px;">
+    </button>
+
+    <!-- The Tools' UI -->
+    <div id="toolbar"></div>
+    <div id="playbar"></div>
+    <div id="sidebar"></div>
+
+    <!-- MODAL -->
+    <div id="modal_container">
+        <div id="modal_bg"></div>
+        <div id="modal">
+            <div id="modal_close">[×] CERRAR</div>
+            <div id="modal_page"></div>
+        </div>
+    </div>
+
+    <!-- En Medio del Contexto link con imagen -->
+    <a href="https://enmediodelcontexto.com.ar" class="contexto-link" target="_blank">
+        <img src="https://enmediodelcontexto.com.ar/wp-content/uploads/2025/11/EMC-white-cropped.png" alt="En Medio del Contexto">
+    </a>
+
+<!-- Scripts! -->
+
+<!-- Libraries -->
+<script src="js/Sidebar.js?v=999"></script>
+<script src="js/helpers.js?v=2"></script>
+<script src="js/Mouse.js"></script>
+<script src="js/Key.js"></script>
+<script src="js/Panner.js"></script>
+
+<!-- Core Simulation Code -->
+<script src="js/Loopy.js?v=6"></script>
+<script src="js/Model.js?v=3"></script>
+<script src="js/Node.js?v=4"></script>
+<script src="js/Edge.js?v=2"></script>
+<script src="js/NIRA.js?v=1"></script>
+<script src="js/Label.js"></script>
+
+<!-- Tools -->
+<script src="js/PageUI.js"></script>
+<script src="js/Sidebar.js?v=3"></script>
+<script src="js/Toolbar.js"></script>
+<script src="js/PlayControls.js"></script>
+<script src="js/Modal.js?v=4"></script>
+<script src="js/Ink.js"></script>
+<script src="js/Dragger.js"></script>
+<script src="js/Eraser.js"></script>
+<script src="js/Labeller.js"></script>
+
+<!-- Start it -->
+<script>
+window.onload = function(){
+
+    // Grid toggle UI sync
+    var gridToggle = document.getElementById('grid-toggle');
+    var gridOverlay = document.getElementById('grid-overlay');
+    subscribe("grid/toggle", function(show) {
+        if (show) {
+            gridOverlay.classList.add('show');
+        } else {
+            gridOverlay.classList.remove('show');
+        }
+    });
+
+    // Start Loopy
+    window.loopy = new Loopy();
+
+    // Grid toggle logic
+    gridToggle.onclick = function() {
+        var tag = this.querySelector('.button-tag');
+        if(tag) tag.remove();
+        window.loopy.showGrid = !window.loopy.showGrid;
+        publish("grid/toggle", [window.loopy.showGrid]);
+        publish("model/changed");
+    };
+
+    // Sidebar toggle logic
+    var sidebarToggle = document.getElementById('sidebar-toggle');
+    var sidebar = document.getElementById('sidebar');
+    sidebarToggle.onclick = function() {
+        if (sidebar.classList.contains('show')) {
+            sidebar.classList.remove('show');
+        } else {
+            sidebar.classList.add('show');
+        }
+    };
+
+    // Recenter button logic
+    var recenterButton = document.getElementById('recenter-button');
+    recenterButton.onclick = function() {
+        var tag = this.querySelector('.button-tag');
+        if(tag) tag.remove();
+        window.loopy.model.center(true);
+        publish("resize");
+    };
+
+    // Auto-show sidebar when editing
+    subscribe("sidebar/show", function() {
+        sidebar.classList.add('show');
+    });
+
+// NIRA toggle (analizar/cancelar)
+window.toggleNira = function() {
+    if (window.NIRA && window.NIRA.running) {
+        publish("nira/cancel");
+    } else {
+        publish("nira/analyze");
+    }
+};
+
+// Actualizar UI según estado de NIRA
+subscribe("nira/started", function() {
+    var btn = document.getElementById('nira_button');
+    var cancelBtn = document.getElementById('nira_cancel_button');
+    if (btn) {
+        btn.textContent = 'analizando...';
+        btn.style.background = '#999';
+        btn.style.pointerEvents = 'none';
+    }
+    if (cancelBtn) {
+        cancelBtn.style.display = 'block';
+    }
+});
+
+subscribe("nira/finished", function() {
+    var btn = document.getElementById('nira_button');
+    var cancelBtn = document.getElementById('nira_cancel_button');
+    if (btn) {
+        btn.textContent = 'analizar intervenciones (NIRA)';
+        btn.style.background = '';
+        btn.style.pointerEvents = '';
+    }
+    if (cancelBtn) {
+        cancelBtn.style.display = 'none';
+    }
+});
+
+};
+</script>
+</body>
+</html>
