@@ -327,8 +327,37 @@ function _getParameterByName(name){
 };
 
 
+// ==========================================
+// HELPER: Generador de Color al Azar (Red de Seguridad)
+// ==========================================
+function _getRandomHexColor() {
+    var letters = '0123456789ABCDEF';
+    var color = '#';
+    for (var i = 0; i < 6; i++) {
+        color += letters[Math.floor(Math.random() * 16)];
+    }
+    return color;
+}
+
+// ==========================================
+// HELPER: Mezcla de Colores (Blindado contra crashes)
+// ==========================================
 function _blendColors(hex1, hex2, blend){
     
+    // 1. SALVAGUARDA DE COLORES: Si falta el color o no es un string hexadecimal válido,
+    // le asignamos un color al azar para evitar el error "Cannot read properties of undefined".
+    if (typeof hex1 !== 'string' || hex1.charAt(0) !== '#') {
+        hex1 = _getRandomHexColor();
+    }
+    if (typeof hex2 !== 'string' || hex2.charAt(0) !== '#') {
+        hex2 = _getRandomHexColor();
+    }
+    
+    // 2. SALVAGUARDA DE MEZCLA: Si el factor de blend es inválido, usamos 50% por defecto.
+    if (typeof blend !== 'number' || isNaN(blend)) {
+        blend = 0.5;
+    }
+
     var color = "#";
     for(var i=0; i<3; i++) {
         
@@ -351,6 +380,7 @@ function _blendColors(hex1, hex2, blend){
     return color;
 
 }
+
 
 function _shiftArray(array, shiftIndex){
     var moveThisAround = array.splice(-shiftIndex);
@@ -381,4 +411,10 @@ function _wrapText(ctx, text, maxWidth) {
     return lines;
     }
 
+function _normalizeWhitespace(s) {
+    return String(s || "")
+        .replace(/[\r\n]+/g, " ")
+        .replace(/\s+/g, " ")
+        .trim();
+}
 
