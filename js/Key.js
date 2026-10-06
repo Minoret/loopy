@@ -10,7 +10,6 @@
         91: "control", // macs (Command)
         13: "enter", // enter
         32: "space", // space
-
         68: "ink", // (D)ibujar
         86: "drag", // Mo(v)e
         69: "erase", // (E)rase
