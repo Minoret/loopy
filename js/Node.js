@@ -162,6 +162,12 @@ var _listenerReset = subscribe("model/reset", function(){
             myEdges[i].addSignal(signal);
         }
     };
+    // NIRA: la rotación (shiftIndex) es estado PRIVADO que sobrevive entre
+    // pasadas. Cuando el tope de señales de Edge.addSignal descarta señales,
+    // el orden de emisión decide cuáles se pierden. NIRA la reinicia al
+    // comienzo de cada simulación para que baseline e intervenciones
+    // arranquen idénticos. No se usa en el juego interactivo.
+    self._resetSignalOrder = function(){ shiftIndex = 0; };
 
     // Agregación: acumula señales entrantes y emite UNA sola por ráfaga.
     // Latencia en segundos. 0 = sin agregación.
@@ -282,7 +288,10 @@ var _listenerReset = subscribe("model/reset", function(){
         var y = self.y*2;
         var r = self.getDisplayRadius()*2;
         var color = Node.COLORS[self.hue];
-
+        // SALVAGUARDA: Si el color es undefined o inválido, elegir uno al azar del rango de Loopy
+if (typeof color !== 'string' || color.charAt(0) !== '#') {
+    color = Node.COLORS[Math.floor(Math.random() * Node.COLORS.length)];
+}
         // Translate!
         ctx.save();
         ctx.translate(x,y+_offset);
@@ -389,18 +398,24 @@ if(isSelectedInSidebar || isSelectedInArray){
         ctx.fillStyle = color;
         ctx.fill();
 
-        // Text!
-        ctx.textAlign = "center";
-        ctx.textBaseline = "middle";
-        ctx.fillStyle = "#000";
+// Text!
+ctx.textAlign = "center";
+ctx.textBaseline = "middle";
+ctx.fillStyle = "#000";
 
-        var fontsize = 40;
-        var maxWidth = r*2 - 30;
-        var lines;
+// SALVAGUARDA: Si el label es undefined o no es string, usar fallback
+var labelText = self.label;
+if (typeof labelText !== 'string') {
+    labelText = "Nodo " + self.id;
+}
 
-        while(fontsize > 5){
-            ctx.font = "normal "+fontsize+"px 'Figtree', sans-serif";
-            lines = _wrapText(ctx, self.label, maxWidth);
+var fontsize = 40;
+var maxWidth = r*2 - 30;
+var lines;
+
+while(fontsize > 5){
+    ctx.font = "normal "+fontsize+"px 'Figtree', sans-serif";
+    lines = _wrapText(ctx, labelText, maxWidth);
 
             var maxWidthExceeded = false;
             for(var i=0; i<lines.length; i++){

@@ -538,7 +538,7 @@ GRID OVERLAY
     #playbar {
         left: 50% !important;
         transform: translateX(-50%);
-        bottom: 80px;
+        bottom: 3px;
         width: 250px !important;
         height: auto !important;
     }
@@ -586,8 +586,8 @@ GRID OVERLAY
         position: absolute !important;
     }
     #toolbar {
-        top: 20px;
-        left: 10px;
+        top: 100px;
+        left: 0px;
         height: auto;
         padding: 2px;
         width: 65px;
@@ -623,9 +623,10 @@ GRID OVERLAY
         display: inline-block;
     }
     #extra-buttons {
-        bottom: 20px;
+        bottom: 5px;
         right: auto;
-        left: 20px;
+        left: 6px;
+        gap: 4px;
     }
 }
 .button-tag {

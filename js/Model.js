@@ -174,11 +174,63 @@ self._resolveEdgeRef = function(saved) {
 // MOLAR: Agrupación de Nodos (Versión Corregida y Blindada)
 // ==========================================
 
+// ------------------------------------------
+// MOLAR: Sugerencia automática de nombre
+// ------------------------------------------
+// Al agrupar, el molar nace con un nombre sugerido (el clínico puede renombrarlo):
+// primera palabra significativa de cada hijo, unidas por " / ". Si hay más de 3
+// hijos, o si las palabras no alcanzan a distinguir al menos 2 elementos, "Grupo de N".
+var _MOLAR_STOPWORDS = {};
+("el la los las un una unos unas lo al del de y e o u ni no me mi mis tu tus su sus se te le les nos " +
+ "que en con por para sin sobre ante hacia desde como muy mas es soy estoy hay yo a")
+    .split(" ").forEach(function(w) { _MOLAR_STOPWORDS[w] = true; });
+
+// Minúsculas y sin tildes, para comparar palabras ("Más" == "mas").
+function _molarNormWord(w) {
+    w = String(w).toLowerCase();
+    return w.normalize ? w.normalize("NFD").replace(/[\u0300-\u036f]/g, "") : w;
+}
+
+// Primera palabra significativa de un label ("" si no hay ninguna).
+function _molarFirstWord(label) {
+    var tokens = String(label == null ? "" : label).split(/\s+/);
+    var firstAny = "";
+    for (var i = 0; i < tokens.length; i++) {
+        // Quita comillas, signos y símbolos de los bordes (conserva letras con tilde y ñ)
+        var t = tokens[i].replace(/^[^A-Za-z0-9\u00C0-\u024F]+|[^A-Za-z0-9\u00C0-\u024F]+$/g, "");
+        if (!t) continue;
+        if (!firstAny) firstAny = t;
+        if (t.length > 1 && !_MOLAR_STOPWORDS[_molarNormWord(t)]) return t;
+    }
+    return firstAny; // todas eran conectores: mejor la primera palabra que nada
+}
+
+self._suggestMolarLabel = function(nodes) {
+    var n = nodes ? nodes.length : 0;
+    var fallback = "Grupo de " + n;
+    if (n > 3) return fallback;
+    var parts = [], seen = {};
+    for (var i = 0; i < n; i++) {
+        var word = _molarFirstWord(nodes[i].label);
+        if (!word) continue;
+        var key = _molarNormWord(word);
+        if (seen[key]) continue; // dos hijos que empiezan igual no suman información
+        seen[key] = true;
+        parts.push(word.charAt(0).toUpperCase() + word.slice(1));
+    }
+    return parts.length >= 2 ? parts.join(" / ") : fallback;
+};
+
 self.groupNodes = function(nodeArray) {
     if (!nodeArray || nodeArray.length < 2) return;
     if(loopy.saveUndo) loopy.saveUndo();
     
-    // 1. APLANAMIENTO: Evita grupos anidados como ((AB)C)
+    // 1. APLANAMIENTO: Evita grupos anidados como ((AB)C).
+    // Si la selección incluye un molar, se lo DISUELVE y sus hijos pasan al grupo nuevo.
+    // OJO: los hijos de un molar están OCULTOS por diseño (hidden = true), así que
+    // acá NO se puede filtrar por !child.hidden (antes el aplanamiento nunca juntaba
+    // a los hijos: {AB}+C quedaba como [C] y no hacía nada, o peor, destruía el molar
+    // y dejaba A y B ocultos para siempre).
     var finalNodesToGroup = [];
     var molarsToDestroy = [];
     
@@ -187,11 +239,9 @@ self.groupNodes = function(nodeArray) {
             molarsToDestroy.push(n);
             n.children.forEach(function(childId) {
                 var child = self.getNode(childId);
-                if (child && !child.hidden) {
-                    finalNodesToGroup.push(child);
-                }
+                if (child) finalNodesToGroup.push(child);
             });
-        } else {
+        } else if (!n.hidden) {
             finalNodesToGroup.push(n);
         }
     });
@@ -211,7 +261,7 @@ self.groupNodes = function(nodeArray) {
     var molar = self.addNode({
         x: sumX / finalNodesToGroup.length,
         y: sumY / finalNodesToGroup.length,
-        label: "?",
+        label: self._suggestMolarLabel(finalNodesToGroup), // antes: "?"
         hue: finalNodesToGroup[0].hue,
         borderWidth: 12
     });
@@ -226,12 +276,19 @@ self.groupNodes = function(nodeArray) {
         n.hidden = true; 
         return n.id; 
     });
-    molar.children = childIds.slice(); // ¡Ahora sí se guarda en el nodo correcto!
+    molar.children = childIds.slice();
     
-    // 6. GESTIONAR ARISTAS: Preservar internas, agregar Interruptor Maestro, y eliminar externas
+    // 6. GESTIONAR ARISTAS: Preservar internas, y eliminar externas.
+    // Las aristas que tocan a un molar que se está disolviendo (interruptor maestro
+    // viejo y aristas consolidadas viejas) son DERIVADAS: se ignoran acá y desaparecen
+    // con oldMolar.kill() (removeNode mata sus aristas). Si se las guardara, el molar
+    // nuevo heredaría aristas "desde" un nodo muerto.
+    var destroyedIds = molarsToDestroy.map(function(m) { return m.id; });
     var edgesToKill = [];
     
     self.edges.forEach(function(edge) {
+        if (destroyedIds.indexOf(edge.from.id) !== -1 || destroyedIds.indexOf(edge.to.id) !== -1) return;
+        
         var fromIsChild = childIds.indexOf(edge.from.id) !== -1;
         var toIsChild = childIds.indexOf(edge.to.id) !== -1;
         
@@ -253,7 +310,59 @@ self.groupNodes = function(nodeArray) {
         }
     });
 
-    // 7. EL INTERRUPTOR MAESTRO (NUEVO): Conectar el Molar a sus hijos para activarlos
+    // 6.5 HEREDAR las aristas guardadas de los molares disueltos.
+    // Las aristas externas ORIGINALES de los hijos viejos ya no existen en el modelo
+    // (se mataron al agrupar la primera vez): solo viven en oldMolar.savedEdges. Sin
+    // esta herencia, el grupo nuevo perdería toda la conectividad de A y B.
+    var sameSaved = function(a, b) {
+        return a.from === b.from && a.to === b.to && a.strength === b.strength && a.arc === b.arc;
+    };
+    molarsToDestroy.forEach(function(oldMolar) {
+        (oldMolar.savedEdges || []).forEach(function(se) {
+            // Referencias a un molar disuelto (aristas derivadas) o a nodos que ya no existen
+            if (destroyedIds.indexOf(se.from) !== -1 || destroyedIds.indexOf(se.to) !== -1) return;
+            if (!self.getNode(se.from) || !self.getNode(se.to)) return;
+            
+            var fromIsChild = childIds.indexOf(se.from) !== -1;
+            var toIsChild = childIds.indexOf(se.to) !== -1;
+            if (!fromIsChild && !toIsChild) return; // no toca al grupo nuevo
+            
+            // Ya capturada en el paso 6 (p. ej. una arista interna vieja que sigue viva)
+            var dup = molar.savedEdges.some(function(x) { return sameSaved(x, se); });
+            if (dup) return;
+            
+            var rec = { from: se.from, to: se.to, strength: se.strength, arc: se.arc, rotation: se.rotation || 0 };
+            molar.savedEdges.push(rec);
+            
+            // Una arista que era EXTERNA al molar viejo (p. ej. A→C) y ahora queda
+            // INTERNA al grupo nuevo debe volver a estar VIVA: las internas se preservan.
+            if (fromIsChild && toIsChild) {
+                var live = self.edges.some(function(e) { return e.from.id === rec.from && e.to.id === rec.to; });
+                if (!live) self.addEdge({ from: rec.from, to: rec.to, strength: rec.strength, arc: rec.arc, rotation: rec.rotation });
+            }
+        });
+    });
+
+    // 7. Historial de los molares disueltos (igual que ungroupNode): permite que
+    // _resolveEdgeRef resuelva referencias que otros molares aún tengan hacia ellos.
+    if (!self.molarHistory) self.molarHistory = {};
+    molarsToDestroy.forEach(function(oldMolar) {
+        self.molarHistory[oldMolar.id] = {
+            children: oldMolar.children ? oldMolar.children.slice() : [],
+            savedEdges: oldMolar.savedEdges ? oldMolar.savedEdges.slice() : []
+        };
+    });
+
+    // 8. Ejecutar eliminaciones. Cada arista se mata UNA sola vez: removeEdge hace
+    // splice(indexOf(edge), 1), y con una arista ya muerta (indexOf = -1) borraría
+    // la ÚLTIMA arista del modelo. Las aristas de los molares viejos las mata kill().
+    edgesToKill.forEach(function(e) { e.kill(); });
+    if (loopy.selectedNodes) {
+        loopy.selectedNodes = loopy.selectedNodes.filter(function(n) { return n && destroyedIds.indexOf(n.id) === -1; });
+    }
+    molarsToDestroy.forEach(function(oldMolar) { oldMolar.kill(); });
+
+    // 9. EL INTERRUPTOR MAESTRO: Conectar el Molar a sus hijos para activarlos
     // Esto asegura que cuando NIRA interviene el molar, la señal se distribuya a los hijos
     childIds.forEach(function(childId) {
         self.addEdge({
@@ -266,14 +375,7 @@ self.groupNodes = function(nodeArray) {
         });
     });
 
-    // 8. Ejecutar eliminaciones y aplanamiento
-    edgesToKill.forEach(function(e) { e.kill(); });
-    
-    molarsToDestroy.forEach(function(oldMolar) {
-        oldMolar.kill();
-    });
-    
-    // 9. Crear aristas simplificadas VISUALES hacia el exterior
+    // 10. Crear aristas simplificadas VISUALES hacia el exterior
     var edgeMap = {};
     molar.savedEdges.forEach(function(se) {
         var isChildOutgoing = (childIds.indexOf(se.from) !== -1);
@@ -281,6 +383,15 @@ self.groupNodes = function(nodeArray) {
         
         // Solo nos interesan las conexiones hacia fuera del grupo
         if (childIds.indexOf(externalId) === -1) {
+            // Si el otro extremo quedó oculto dentro de OTRO molar, la arista visual
+            // va hacia ese molar; nunca hacia un nodo oculto.
+            var extNode = self.getNode(externalId);
+            if (!extNode) return;
+            if (extNode.hidden) {
+                var host = self._findMolarContaining(externalId);
+                if (!host || host.id === molar.id) return;
+                externalId = host.id;
+            }
             var key = externalId + '_' + (isChildOutgoing ? 'out' : 'in');
             if (!edgeMap[key]) {
                 edgeMap[key] = { externalId: externalId, isOutgoing: isChildOutgoing, totalStrength: 0, count: 0 };
@@ -308,7 +419,7 @@ self.groupNodes = function(nodeArray) {
             from: group.isOutgoing ? molar.id : group.externalId,
             to: group.isOutgoing ? group.externalId : molar.id,
             strength: clampedStrength,
-            signal: clampedStrength, // <-- Esto ya lo tenías, ¡perfecto!
+            signal: clampedStrength,
             arc: safeArc,
             rotation: 0
         });
@@ -1155,5 +1266,850 @@ var _editCallback = function(){
         loopy.offsetY = sh/2 - cy*loopy.offsetScale;
 
     };
+
+  // ============================================================
+  // MOLAR / ZONE GEOMETRY PATCH
+  // ------------------------------------------------------------
+  // Implementa:
+  // 1. center() visible-only.
+  // 2. Zona verde dinámica sincronizada con el canvas.
+  // 3. ungroupNode() condicional zona verde / zona roja.
+  // 4. Una sola perilla pública de ajuste: zoneScale.
+  // 5. Overlay debug opcional.
+  // 6. Calibración debug opcional mediante nodos "verde" / "rojo".
+  //
+  // No toca NIRA, Edge, Node ni Loopy.js.
+  // ============================================================
+  (function(){
+
+    var OVERLAY_ID = "molar-zone-overlay";
+
+    // ========================================================
+    // Helpers internos
+    // ========================================================
+    function viewScale(){
+      var s = loopy.offsetScale;
+      if (!isFinite(s) || s <= 0) return 1;
+      return s;
+    }
+
+    function radiusOf(node){
+      if (!node) return 60;
+
+      try {
+        if (typeof node.getDisplayRadius === "function") {
+          var r = node.getDisplayRadius();
+          if (isFinite(r) && r > 0) return r;
+        }
+      } catch (e) {}
+
+      if (isFinite(node.radius) && node.radius > 0) return node.radius;
+
+      return 60;
+    }
+
+    function normalizeLabel(label){
+      return String(label || "").trim().toLowerCase();
+    }
+
+    function applyStyles(el, styles){
+      for (var prop in styles) {
+        if (styles.hasOwnProperty(prop)) {
+          el.style[prop] = styles[prop];
+        }
+      }
+    }
+
+    //     // ========================================================
+    // 1. CENTER VISIBLE-ONLY
+    // ------------------------------------------------------------
+    // Parchea self.center para que los nodos hidden no afecten
+    // el bounding box de centrado/zoom.
+    //
+    // IMPORTANTE:
+    // Usa getBoundingBox() de nodos/aristas/labels visibles,
+    // no solo node.x/node.y. Esto evita que el centrado corte
+    // parte del círculo del nodo por calcular el zoom como si
+    // los nodos fueran puntos.
+    // ========================================================
+    var _origCenter = self.center;
+
+    self.center = function(andScale){
+
+      // If no nodes & no labels, forget it.
+      if (self.nodes.length === 0 && self.labels.length === 0) {
+        return;
+      }
+
+      var left = Infinity;
+      var top = Infinity;
+      var right = -Infinity;
+      var bottom = -Infinity;
+
+      function addBounds(obj){
+        if (!obj || typeof obj.getBoundingBox !== "function") {
+          return;
+        }
+
+        var b = obj.getBoundingBox();
+
+        if (!b) {
+          return;
+        }
+
+        if (isFinite(b.left) && b.left < left) {
+          left = b.left;
+        }
+
+        if (isFinite(b.top) && b.top < top) {
+          top = b.top;
+        }
+
+        if (isFinite(b.right) && b.right > right) {
+          right = b.right;
+        }
+
+        if (isFinite(b.bottom) && b.bottom > bottom) {
+          bottom = b.bottom;
+        }
+      }
+
+      // 1. Nodos visibles: usar bounding box real, no solo centro.
+      for (var i = 0; i < self.nodes.length; i++) {
+        var node = self.nodes[i];
+
+        if (node.hidden) {
+          continue;
+        }
+
+        addBounds(node);
+      }
+
+      // 2. Aristas visibles: solo si ambos extremos son visibles.
+      // Las aristas hacia/desde hijos ocultos no deben afectar la cámara.
+      for (var e = 0; e < self.edges.length; e++) {
+        var edge = self.edges[e];
+
+        if (!edge || !edge.from || !edge.to) {
+          continue;
+        }
+
+        if (edge.from.hidden || edge.to.hidden) {
+          continue;
+        }
+
+        addBounds(edge);
+      }
+
+      // 3. Labels: mantener comportamiento original.
+      // Si más adelante querés que los labels no afecten el centrado,
+      // se puede comentar este loop.
+      for (var l = 0; l < self.labels.length; l++) {
+        addBounds(self.labels[l]);
+      }
+
+      // Si nada produjo bounds, delegar al center original como fallback.
+      if (
+        left === Infinity ||
+        top === Infinity ||
+        right === -Infinity ||
+        bottom === -Infinity
+      ) {
+        return _origCenter.call(self, andScale);
+      }
+
+      // Re-center!
+      var canvasses = document.getElementById("canvasses");
+      var sw = canvasses ? canvasses.clientWidth : window.innerWidth;
+      var sh = canvasses ? canvasses.clientHeight : window.innerHeight;
+
+      sw = Math.max(1, sw || 1);
+      sh = Math.max(1, sh || 1);
+
+      var cx = (left + right) / 2;
+      var cy = (top + bottom) / 2;
+
+      // SCALE.
+      if (andScale) {
+        var w = Math.max(1, right - left);
+        var h = Math.max(1, bottom - top);
+
+        var pad = (typeof _PADDING !== "undefined" ? _PADDING : 40) * 4;
+
+        var fitWidth = Math.max(1, sw - pad);
+        var fitHeight = Math.max(1, sh - pad);
+
+        loopy.offsetScale = Math.min(fitWidth / w, fitHeight / h);
+      }
+
+      loopy.offsetX = sw / 2 - cx * loopy.offsetScale;
+      loopy.offsetY = sh / 2 - cy * loopy.offsetScale;
+    };
+
+    // ========================================================
+    // 2. ZONAS DINÁMICAS
+    // ========================================================
+    self.zones = {
+
+      settings: {
+        // Única variable que el usuario debe tocar para ajustar la zona.
+        // zoneScale = 1.0  -> zona base.
+        // zoneScale > 1.0  -> zona verde más chica, zona roja más grande.
+        // zoneScale < 1.0  -> zona verde más grande, zona roja más chica.
+        zoneScale: 1.0,
+
+        // Margen proporcional automático si no hay calibración guardada.
+        autoMarginFrac: 0.048,
+
+        // Padding mínimo extra respecto del radio visual del nodo.
+        nodePadPx: 20,
+
+        // Separación extra entre hijos reubicados en anillo.
+        gap: 35,
+
+        // Si true, usa el margen más exigente en X e Y.
+        // Esto suele verse más estable visualmente.
+        isotropic: true,
+        ignoreMinRadius: true,
+
+        storageKey: "niraLoopy.zoneCalibration",
+
+        debugLabels: {
+          green: "verde",
+          red: "rojo"
+        }
+      },
+
+      calibration: null,
+
+      canvasSize: function(){
+        var c = document.getElementById("canvasses");
+
+        var sw = null;
+        var sh = null;
+
+        if (c) {
+          sw = c.clientWidth;
+          sh = c.clientHeight;
+
+          if (!sw || !sh) {
+            var box = c.getBoundingClientRect();
+            sw = box.width;
+            sh = box.height;
+          }
+        }
+
+        if (!sw || !isFinite(sw)) sw = window.innerWidth;
+        if (!sh || !isFinite(sh)) sh = window.innerHeight;
+
+        sw = Math.max(1, Math.round(sw));
+        sh = Math.max(1, Math.round(sh));
+
+        return { sw: sw, sh: sh };
+      },
+
+      screenOf: function(obj){
+        var p = (obj && obj.id !== undefined)
+          ? { x: obj.x, y: obj.y }
+          : obj;
+
+        var s = viewScale();
+
+        return {
+          x: p.x * s + loopy.offsetX,
+          y: p.y * s + loopy.offsetY
+        };
+      },
+
+      modelFromScreen: function(point){
+        var s = viewScale();
+
+        return {
+          x: (point.x - loopy.offsetX) / s,
+          y: (point.y - loopy.offsetY) / s
+        };
+      },
+
+      safeRect: function(){
+        var size = self.zones.canvasSize();
+        var settings = self.zones.settings;
+        var cal = self.zones.calibration;
+
+        var fracX = (cal && isFinite(cal.marginFracX))
+          ? cal.marginFracX
+          : settings.autoMarginFrac;
+
+        var fracY = (cal && isFinite(cal.marginFracY))
+          ? cal.marginFracY
+          : settings.autoMarginFrac;
+
+        var zoneScale = Number(settings.zoneScale);
+
+        if (!isFinite(zoneScale) || zoneScale <= 0) {
+          zoneScale = 1.0;
+          settings.zoneScale = 1.0;
+        }
+
+        var mX = fracX * size.sw * zoneScale;
+        var mY = fracY * size.sh * zoneScale;
+
+        if (settings.isotropic) {
+          var iso = Math.max(mX, mY);
+          mX = iso;
+          mY = iso;
+        }
+
+        // Margen mínimo visual basado en el radio de los nodos visibles.
+        var s = viewScale();
+        var maxRadiusScreen = 0;
+
+        for (var i = 0; i < self.nodes.length; i++) {
+          var n = self.nodes[i];
+
+          if (!n.hidden) {
+            var r = radiusOf(n) * s;
+            if (r > maxRadiusScreen) maxRadiusScreen = r;
+          }
+        }
+
+        if (!(maxRadiusScreen > 0)) {
+          maxRadiusScreen = 60 * s;
+        }
+
+        var minMargin = Math.ceil(maxRadiusScreen + settings.nodePadPx);
+
+	if (!settings.ignoreMinRadius) {
+        mX = Math.max(mX, minMargin);
+        mY = Math.max(mY, minMargin);
+	}
+
+        // Evitar que la zona segura desaparezca en canvas muy chicos.
+        var maxMargin = Math.max(
+          0,
+          Math.floor(Math.min(size.sw, size.sh) / 2) - 10
+        );
+
+        mX = Math.min(mX, maxMargin);
+        mY = Math.min(mY, maxMargin);
+
+        mX = Math.max(0, Math.round(mX));
+        mY = Math.max(0, Math.round(mY));
+
+        return {
+          left: mX,
+          top: mY,
+          right: size.sw - mX,
+          bottom: size.sh - mY,
+          sw: size.sw,
+          sh: size.sh,
+          margin: Math.min(mX, mY),
+          marginX: mX,
+          marginY: mY,
+          zoneScale: zoneScale,
+          source: cal ? "calibración" : "auto",
+          isotropic: !!settings.isotropic,
+          nodePadPx: settings.nodePadPx,
+          minRadiusMargin: minMargin
+        };
+      },
+
+      isInsideRect: function(point, rect){
+        return (
+          point.x >= rect.left &&
+          point.x <= rect.right &&
+          point.y >= rect.top &&
+          point.y <= rect.bottom
+        );
+      },
+
+      clampPointToRect: function(point, rect){
+        return {
+          x: Math.min(Math.max(point.x, rect.left), rect.right),
+          y: Math.min(Math.max(point.y, rect.top), rect.bottom)
+        };
+      },
+
+      landingModelPoint: function(molarPoint, rect){
+        var screen = self.zones.screenOf(molarPoint);
+
+        if (self.zones.isInsideRect(screen, rect)) {
+          return {
+            x: molarPoint.x,
+            y: molarPoint.y,
+            used: "molar"
+          };
+        }
+
+        var safeScreen = self.zones.clampPointToRect(screen, rect);
+        var safeModel = self.zones.modelFromScreen(safeScreen);
+
+        return {
+          x: safeModel.x,
+          y: safeModel.y,
+          used: "safe-border"
+        };
+      },
+
+      ringPositionsAroundPoint: function(center, children, gap){
+        var k = Math.max(1, children.length);
+        var s = viewScale();
+
+        var maxRScreen = 0;
+
+        for (var i = 0; i < children.length; i++) {
+          var r = radiusOf(children[i]) * s;
+          if (r > maxRScreen) maxRScreen = r;
+        }
+
+        if (!(maxRScreen > 0)) {
+          maxRScreen = 60 * s;
+        }
+
+        var gapPx = (gap == null) ? self.zones.settings.gap : gap;
+        var desiredScreenSeparation = 2 * maxRScreen + gapPx;
+
+        var radiusScreen = (k === 1)
+          ? 0
+          : desiredScreenSeparation / (2 * Math.sin(Math.PI / k));
+
+        var radiusModel = radiusScreen / s;
+
+        var out = [];
+
+        for (var j = 0; j < k; j++) {
+          var angle = (j / k) * Math.PI * 2 - Math.PI / 2;
+
+          out.push({
+            x: center.x + Math.cos(angle) * radiusModel,
+            y: center.y + Math.sin(angle) * radiusModel,
+            angle: angle,
+            radiusModel: radiusModel,
+            radiusScreen: radiusScreen
+          });
+        }
+
+        return out;
+      },
+
+      showOverlay: function(){
+        self.zones.hideOverlay();
+
+        var rect = self.zones.safeRect();
+        var canvas = document.getElementById("canvasses");
+        var box = canvas ? canvas.getBoundingClientRect() : { left: 0, top: 0 };
+
+        var div = document.createElement("div");
+        div.id = OVERLAY_ID;
+
+        applyStyles(div, {
+          position: "fixed",
+          left: (box.left + rect.left) + "px",
+          top: (box.top + rect.top) + "px",
+          width: (rect.right - rect.left) + "px",
+          height: (rect.bottom - rect.top) + "px",
+          border: "3px solid rgba(0, 255, 120, 0.9)",
+          boxShadow: "0 0 0 9999px rgba(255, 0, 0, 0.12)",
+          pointerEvents: "none",
+          zIndex: 999999,
+          boxSizing: "border-box"
+        });
+
+        document.body.appendChild(div);
+
+        console.log("Zona verde mostrada:", rect);
+      },
+
+      hideOverlay: function(){
+        var old = document.getElementById(OVERLAY_ID);
+        if (old) old.remove();
+      },
+
+      setZoneScale: function(value){
+        var x = Number(value);
+
+        if (!isFinite(x) || x <= 0) {
+          console.warn("zoneScale inválido. Usá un número positivo, por ejemplo 1.0, 1.2 o 0.8.");
+          return null;
+        }
+
+        self.zones.settings.zoneScale = x;
+
+        if (document.getElementById(OVERLAY_ID)) {
+          self.zones.showOverlay();
+        }
+
+        var rect = self.zones.safeRect();
+
+        console.log("zoneScale ajustado:", {
+          zoneScale: x,
+          canvas: self.zones.canvasSize(),
+          safeRect: rect
+        });
+
+        return rect;
+      },
+
+      debugZone: function(){
+        var out = {
+          canvas: self.zones.canvasSize(),
+          zoneScale: self.zones.settings.zoneScale,
+          calibration: self.zones.calibration,
+          safeRect: self.zones.safeRect()
+        };
+
+        console.log("Debug de zona dinámica:", out);
+        return out;
+      },
+
+      saveCalibration: function(){
+        try {
+          if (!self.zones.calibration) {
+            console.warn("No hay calibración para guardar.");
+            return false;
+          }
+
+          localStorage.setItem(
+            self.zones.settings.storageKey,
+            JSON.stringify(self.zones.calibration)
+          );
+
+          console.log("Calibración guardada en localStorage.");
+          return true;
+        } catch (e) {
+          console.warn("No se pudo guardar calibración:", e);
+          return false;
+        }
+      },
+
+      loadCalibration: function(){
+        try {
+          var raw = localStorage.getItem(self.zones.settings.storageKey);
+
+          if (!raw) {
+            console.log("No hay calibración guardada.");
+            return null;
+          }
+
+          var parsed = JSON.parse(raw);
+
+          if (
+            parsed &&
+            isFinite(parsed.marginFracX) &&
+            isFinite(parsed.marginFracY)
+          ) {
+            self.zones.calibration = parsed;
+            console.log("Calibración cargada:", parsed);
+            return parsed;
+          }
+
+          console.warn("Calibración guardada inválida. Se ignora.");
+          return null;
+        } catch (e) {
+          console.warn("No se pudo cargar calibración:", e);
+          return null;
+        }
+      },
+
+      clearCalibration: function(){
+        try {
+          localStorage.removeItem(self.zones.settings.storageKey);
+        } catch (e) {}
+
+        self.zones.calibration = null;
+        console.log("Calibración limpiada.");
+      },
+
+      // ======================================================
+      // Herramienta debug opcional:
+      // creá nodos llamados "verde" y/o "rojo" y calibrá.
+      // No es necesario para el comportamiento productivo.
+      // ======================================================
+      calibrateFromLabels: function(opts){
+        opts = opts || {};
+
+        var greenTerm = opts.green || self.zones.settings.debugLabels.green;
+        var redTerm = opts.red || self.zones.settings.debugLabels.red;
+
+        var size = self.zones.canvasSize();
+        var maxMargin = Math.max(
+          0,
+          Math.floor(Math.min(size.sw, size.sh) / 2) - 10
+        );
+
+        function collect(term){
+          var t = normalizeLabel(term);
+          var list = [];
+
+          for (var i = 0; i < self.nodes.length; i++) {
+            var n = self.nodes[i];
+
+            if (!n.hidden && normalizeLabel(n.label).indexOf(t) !== -1) {
+              var s = self.zones.screenOf(n);
+
+              list.push({
+                id: n.id,
+                label: n.label,
+                screenX: +s.x.toFixed(2),
+                screenY: +s.y.toFixed(2),
+                minEdge: Math.min(s.x, size.sw - s.x, s.y, size.sh - s.y)
+              });
+            }
+          }
+
+          return list;
+        }
+
+        function minEdge(list){
+          if (!list.length) return Infinity;
+
+          var m = Infinity;
+
+          for (var i = 0; i < list.length; i++) {
+            if (list[i].minEdge < m) m = list[i].minEdge;
+          }
+
+          return m;
+        }
+
+        function maxEdge(list){
+          if (!list.length) return -1;
+
+          var m = -1;
+
+          for (var i = 0; i < list.length; i++) {
+            if (list[i].minEdge > m) m = list[i].minEdge;
+          }
+
+          return m;
+        }
+
+        var green = collect(greenTerm);
+        var red = collect(redTerm);
+
+        var marginPx;
+        var status = "ok";
+        var conflicts = [];
+
+        if (!green.length && !red.length) {
+          var auto = Math.min(140, Math.max(60, 0.12 * Math.min(size.sw, size.sh)));
+          marginPx = Math.round(auto);
+          status = "sin-etiquetas";
+        } else {
+          var minGreen = green.length ? minEdge(green) : maxMargin;
+          var maxRed = red.length ? maxEdge(red) : -1;
+
+          var low = Math.floor(maxRed) + 1;
+          var high = Math.floor(minGreen);
+
+          if (low <= high) {
+            marginPx = Math.min(high, maxMargin);
+            status = "ok";
+          } else {
+            marginPx = Math.max(0, Math.min(high, maxMargin));
+            status = "conflicto";
+
+            conflicts.push({
+              detail: "No existe un margen rectangular que incluya todos los nodos verde y excluya todos los rojo.",
+              lowRequired: low,
+              highAllowed: high
+            });
+          }
+        }
+
+        marginPx = Math.max(0, Math.min(Math.round(marginPx), maxMargin));
+
+        self.zones.calibration = {
+          version: 1,
+          marginPxAtCalibration: marginPx,
+          marginFracX: marginPx / size.sw,
+          marginFracY: marginPx / size.sh,
+          canvasWidthAtCalibration: size.sw,
+          canvasHeightAtCalibration: size.sh,
+          timestamp: new Date().toISOString(),
+          greenCount: green.length,
+          redCount: red.length,
+          status: status,
+          conflicts: conflicts
+        };
+
+        self.zones.saveCalibration();
+
+        console.log("Calibración desde labels:", self.zones.calibration);
+        console.table(green.concat(red).map(function(p){
+          return {
+            label: p.label,
+            screenX: p.screenX,
+            screenY: p.screenY,
+            minEdge: +p.minEdge.toFixed(2)
+          };
+        }));
+
+        if (conflicts.length) {
+          console.warn("Conflictos de calibración:", conflicts);
+        }
+
+        return self.zones.calibration;
+      },
+
+      deleteCalibrationNodes: function(){
+        var greenTerm = normalizeLabel(self.zones.settings.debugLabels.green);
+        var redTerm = normalizeLabel(self.zones.settings.debugLabels.red);
+
+        var toKill = [];
+
+        for (var i = 0; i < self.nodes.length; i++) {
+          var n = self.nodes[i];
+          var lab = normalizeLabel(n.label);
+
+          if (!n.hidden && (lab.indexOf(greenTerm) !== -1 || lab.indexOf(redTerm) !== -1)) {
+            toKill.push(n);
+          }
+        }
+
+        for (var j = toKill.length - 1; j >= 0; j--) {
+          try {
+            toKill[j].kill();
+          } catch (e) {}
+        }
+
+        publish("model/changed");
+        publish("view/changed");
+
+        console.log("Nodos de calibración eliminados:", toKill.length);
+        return toKill.length;
+      }
+
+    };
+
+    // Atajo conveniente desde la consola:
+    // loopy.zones.setZoneScale(1.2)
+    loopy.zones = self.zones;
+
+    // Cargar calibración persistida si existe.
+    self.zones.loadCalibration();
+
+    // ========================================================
+    // 3. UNGROUP CONDICIONAL ZONA VERDE / ZONA ROJA
+    // ------------------------------------------------------------
+    // Desagrupar NO debe mover la cámara.
+    // Si los hijos caen en zona verde, quedan donde estaban.
+    // Si alguno cae en zona roja, se reubican en anillo seguro.
+    // ========================================================
+    var _origUngroup = self.ungroupNode;
+
+    self.ungroupNode = function(molarNode){
+      if (!molarNode || !molarNode.isMolar) {
+        return _origUngroup.apply(this, arguments);
+      }
+
+      var childIds = (molarNode.children || []).slice();
+      var molarPoint = {
+        x: molarNode.x,
+        y: molarNode.y
+      };
+
+      // Desagrupado original: hace visibles los hijos, restaura aristas, mata molar.
+      var result = _origUngroup.apply(this, arguments);
+
+      var children = [];
+
+      for (var i = 0; i < childIds.length; i++) {
+        var c = self.getNode(childIds[i]);
+        if (c) children.push(c);
+      }
+
+      if (!children.length) {
+        return result;
+      }
+
+      var rect = self.zones.safeRect();
+      var allSafe = true;
+
+      for (var j = 0; j < children.length; j++) {
+        var screen = self.zones.screenOf(children[j]);
+
+        if (!self.zones.isInsideRect(screen, rect)) {
+          allSafe = false;
+          break;
+        }
+      }
+
+      if (allSafe) {
+        console.log("ZONA VERDE: desagrupado antiguo. Los hijos quedan donde estaban. No se movió la cámara.", {
+          molar: molarNode.label,
+          marginX: rect.marginX,
+          marginY: rect.marginY,
+          children: children.map(function(c){ return c.label; })
+        });
+
+        publish("view/changed");
+        return result;
+      }
+
+      // ZONA ROJA: reubicar hijos alrededor de un punto seguro.
+      var landing = self.zones.landingModelPoint(molarPoint, rect);
+      var ring = self.zones.ringPositionsAroundPoint(
+        landing,
+        children,
+        self.zones.settings.gap
+      );
+
+      for (var k = 0; k < children.length; k++) {
+        children[k].hidden = false;
+        children[k].value = children[k].init;
+        children[k].x = ring[k].x;
+        children[k].y = ring[k].y;
+      }
+
+      console.log("ZONA ROJA: desagrupado con reubicación segura. No se movió la cámara.", {
+        molar: molarNode.label,
+        marginX: rect.marginX,
+        marginY: rect.marginY,
+        gap: self.zones.settings.gap,
+        landing: landing,
+        children: children.map(function(c){
+          return {
+            label: c.label,
+            screen: self.zones.screenOf(c)
+          };
+        })
+      });
+
+      publish("view/changed");
+      publish("model/changed");
+
+      return result;
+    };
+
+    // ========================================================
+    // 4. REFRESCO AUTOMÁTICO DEL OVERLAY AL CAMBIAR TAMAÑO
+    // ========================================================
+    self.zones._refreshOverlay = function(){
+      if (document.getElementById(OVERLAY_ID)) {
+        self.zones.showOverlay();
+      }
+    };
+
+    window.addEventListener("resize", self.zones._refreshOverlay);
+
+    if (window.ResizeObserver) {
+      var canvas = document.getElementById("canvasses");
+
+      if (canvas) {
+        self.zones._resizeObserver = new ResizeObserver(function(){
+          self.zones._refreshOverlay();
+        });
+
+        self.zones._resizeObserver.observe(canvas);
+      }
+    }
+
+    console.log("MOLAR zone geometry patch cargado.");
+    console.log("Ajustá la zona con: loopy.zones.setZoneScale(1.2)");
+    console.log("Mostrá la zona con: loopy.zones.showOverlay()");
+    console.log("Debugueá con: loopy.zones.debugZone()");
+
+  })();
+
 
 }
