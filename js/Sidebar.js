@@ -519,21 +519,55 @@ subscribe("nira/pdf", function(){
     doc.text("Fecha: " + dateStr, 14, 28);
     doc.text("Simulaciones realizadas: " + simulaciones, 14, 34);
     
+    // ============ MARCAS EN LA COLUMNA NODO ============
+    //  *  = empate técnico con el siguiente del ranking (r.tieWithNext, calculado en NIRA.js)
+    //  §  = elemento agrupado / molar (r.molarK > 0)
+    // IMPORTANTE: solo caracteres WinAnsi. La fuente helvetica de jsPDF NO dibuja
+    // símbolos como ✦ ◉ ◎ ★ (salen como basura). '\u00A7' = §.
+    var MARK_TIE = "*";
+    var MARK_MOLAR = "\u00A7";
+    function _isTie(r){ return r.tieWithNext === true; }
+    function _isMolar(r){ return (r.molarK || 0) > 0; }
+    // Marcas de una fila separadas por espacio (p. ej. "* \u00A7"). No van dentro del texto
+    // de la celda: se dibujan en negrita, un espacio después del label (ver didDrawCell).
+    function _marksOf(r){
+        var m = [];
+        if (_isTie(r)) m.push(MARK_TIE);
+        if (_isMolar(r)) m.push(MARK_MOLAR);
+        return m.join(" ");
+    }
+
     // ============ TABLA DE RESULTADOS ============
+// ============ EFECTO CASCADA: % del top + valor crudo ============
+var maxImpact = 0;
+for (var _i = 0; _i < results.length; _i++) {
+    var _v = Math.abs(results[_i].avgImpact || 0);
+    if (_v > maxImpact) maxImpact = _v;
+}
+function _efectoCascada(r){
+    var raw = (r.avgImpact !== undefined) ? r.avgImpact : 0;
+    var pct = (maxImpact > 0) ? (raw / maxImpact) * 100 : 0;
+    var pctStr = (pct % 1 === 0) ? pct.toFixed(0) : pct.toFixed(1);
+    var rawStr = raw.toFixed(1);
+    return pctStr + "% (" + rawStr + ")";
+}
     var tableData = results.map(function(r){
         return [
-            r.label, 
+            _normalizeWhitespace(r.label),
             r.top1.toFixed(1) + "%", 
             r.top3.toFixed(1) + "%", 
             r.top5.toFixed(1) + "%",
-            (r.avgImpact !== undefined ? r.avgImpact.toFixed(1) : "-")
+            _efectoCascada(r)
+
         ];
     });
     
+    var tableMarks = results.map(_marksOf); // índice de fila -> marcas ("" si no tiene)
+
     if(typeof doc.autoTable === "function"){
         doc.autoTable({
-            startY: 45,
-            head: [["Nodo", "Top 1", "Top 3", "Top 5", "Impacto Promedio"]],
+            startY: 40,
+            head: [["Nodo", "Top 1", "Top 3", "Top 5", "Efecto cascada"]],
             body: tableData,
             theme: "striped",
             headStyles: { 
@@ -551,11 +585,11 @@ subscribe("nira/pdf", function(){
                 fillColor: [245, 247, 240]  
             },
             columnStyles: {
-                0: { cellWidth: 65, halign: "left" },    // Nodo
-                1: { cellWidth: 20, halign: "center", fontStyle: "bold" }, // Top 1
-                2: { cellWidth: 20, halign: "center" },  // Top 3
-                3: { cellWidth: 20, halign: "center" },  // Top 5
-                4: { cellWidth: 40, halign: "center", fontStyle: "bold" }  // Impacto Promedio
+                0: { cellWidth: 55, halign: "left" },    // Nodo
+                1: { cellWidth: 18, halign: "center", fontStyle: "bold" }, // Top 1
+                2: { cellWidth: 18, halign: "center" },  // Top 3
+                3: { cellWidth: 18, halign: "center" },  // Top 5
+                4: { cellWidth: 55, halign: "center", fontStyle: "bold" }  // Impacto Promedio
             },
             margin: { left: 14, right: 14 },
             didParseCell: function(data) {
@@ -569,18 +603,121 @@ subscribe("nira/pdf", function(){
                 }
                 // Resaltar Impacto Promedio alto (ajusta el umbral '20' si tu escala de AUC es diferente)
                 if (data.column.index === 4 && data.section === 'body') {
-                    var val = parseFloat(data.cell.raw);
+                    var m = /\(([-\d.]+)\)/.exec(String(data.cell.raw));
+                    var val = m ? parseFloat(m[1]) : NaN;
                     if (!isNaN(val) && val > 20) { 
                         data.cell.styles.textColor = [109, 140, 58];
                     }
                 }
+            },
+            didDrawCell: function(data) {
+                // Marcas (* y \u00A7) en negrita y a un espacio del label. autoTable no admite
+                // negrita parcial dentro de una celda, así que se dibujan acá, a continuación
+                // de la última línea del label (misma geometría que usa autoTable: baseline =
+                // textPos.y + 0.85 * tamaño de fuente; interlineado = tamaño * lineHeightFactor).
+                if (data.section !== 'body' || data.column.index !== 0) return;
+                var marks = tableMarks[data.row.index];
+                if (!marks) return;
+                var cell = data.cell;
+                var fs = cell.styles.fontSize;                       // pt
+                var fsU = fs / doc.internal.scaleFactor;             // unidades del documento
+                var lhf = doc.getLineHeightFactor ? doc.getLineHeightFactor() : 1.15;
+                var pos = cell.getTextPos();
+                var lines = cell.text && cell.text.length ? cell.text : [""];
+                doc.setFont("helvetica", "normal");
+                doc.setFontSize(fs);
+                var x = pos.x + doc.getTextWidth(lines[lines.length - 1]) + doc.getTextWidth(" ");
+                var y = pos.y + fsU * (2 - 1.15) + (lines.length - 1) * fsU * lhf;
+                var tc = cell.styles.textColor;
+                if (tc instanceof Array) doc.setTextColor(tc[0], tc[1], tc[2]);
+                else if (typeof tc === "number") doc.setTextColor(tc);
+                else doc.setTextColor(colorText[0], colorText[1], colorText[2]);
+                doc.setFont("helvetica", "bold");
+                doc.text(marks, x, y);
+                doc.setFont("helvetica", "normal");
             }
         });
     }
         
     var finalY = doc.lastAutoTable.finalY + 8;
+
+    // Salto de página: si lo que sigue no entra, se abre una página nueva.
+    // Se reserva el espacio de la nota metodológica (se dibuja al pie de la ÚLTIMA página).
+    function _ensureSpace(h){
+        if (finalY + h > pageHeight - 50) { doc.addPage(); finalY = 20; }
+    }
+
+    // Labels de los hijos de un molar. Se busca por id (fila del ranking) y, como
+    // respaldo, por label.
+    function _getMolarChildrenLabels(r){
+        var molar = loopy.model.getNode(r.id);
+        if (!molar || !molar.isMolar) {
+            molar = null;
+            for (var i = 0; i < loopy.model.nodes.length; i++) {
+                var n = loopy.model.nodes[i];
+                if (n.label === r.label && n.isMolar && n.children) { molar = n; break; }
+            }
+        }
+        if (!molar || !molar.children) return [];
+        var labels = [];
+        for (var c = 0; c < molar.children.length; c++) {
+            var child = loopy.model.getNode(molar.children[c]);
+            if (child) labels.push(child.label);
+        }
+        return labels;
+    }
+
+// ============ LEYENDA DE SÍMBOLOS ============
+var usaTie = results.some(function(r){ return r.tieWithNext === true; });
+
+if (usaTie) {
+    _ensureSpace(14);
+    doc.setFontSize(9);
+    doc.setFont("helvetica", "bold");
+    doc.setTextColor(colorText[0], colorText[1], colorText[2]);
+    doc.text("*", 14, finalY);
+    doc.setFont("helvetica", "normal");
+    var tieText = "Este nodo y el de abajo tienen un impacto tan parecido que el orden entre ambos podría invertirse según la simulación.";
+    var tieLines = doc.splitTextToSize(tieText, pageWidth - 18 - 14);
+    _ensureSpace(tieLines.length * 4 + 2);
+    doc.text(tieLines, 18, finalY);
+    finalY += tieLines.length * 4 + 2;
+}
+// ==============================================
+
+// ============ ELEMENTOS AGRUPADOS (solo si hay molares en el ranking) ============
+var molares = results.filter(_isMolar);
+if (molares.length > 0) {
+    _ensureSpace(20);
+    doc.setFontSize(9);
+    doc.setFont("helvetica", "italic");
+    doc.setTextColor(colorMuted[0], colorMuted[1], colorMuted[2]);
+    doc.text("Intervenir este nodo atenúa los elementos agrupados simultáneamente:", 16, finalY);
+    finalY += 6;
+    molares.forEach(function(m){
+        var hijos = _getMolarChildrenLabels(m).map(_normalizeWhitespace);
+        var cabecera = MARK_MOLAR + " " + _normalizeWhitespace(m.label) + ":";
+        var detalle = hijos.length ? hijos.join(", ") : "(detalle no disponible)";
+        doc.setFont("helvetica", "bold");
+        doc.setTextColor(colorText[0], colorText[1], colorText[2]);
+        var cabW = doc.getTextWidth(cabecera) + 3;
+        var inline = cabW < 80;
+        var x0 = inline ? 16 + cabW : 20;
+        doc.setFont("helvetica", "normal");
+        var detLines = doc.splitTextToSize(detalle, pageWidth - x0 - 14);
+        _ensureSpace(detLines.length * 4 + (inline ? 0 : 4) + 4);
+        doc.setFont("helvetica", "bold");
+        doc.text(cabecera, 16, finalY);
+        if (!inline) finalY += 4;
+        doc.setFont("helvetica", "normal");
+        doc.text(detLines, x0, finalY);
+        finalY += detLines.length * 4 + 2;
+    });
+    finalY += 4;
+}
     
 // ============ GUÍA DE LECTURA ============
+_ensureSpace(30);
 doc.setFont("helvetica", "bold");
 doc.setFontSize(12);
 doc.setTextColor(colorPrimary[0], colorPrimary[1], colorPrimary[2]);
@@ -595,10 +732,11 @@ var guia = [
     { label: "Top 1:", desc: "Porcentaje de simulaciones en las que el nodo fue la mejor diana de intervención. Indica posible prioridad." },
     { label: "Top 3:", desc: "Frecuencia en que el nodo estuvo entre las 3 mejores dianas. Sugiere robustez como diana." },
     { label: "Top 5:", desc: "Frecuencia en que el nodo estuvo entre las 5 mejores dianas. Sugiere relevancia en el sistema." },
-    { label: "Impacto Promedio:", desc: "Reducción promedio de activación del resto del sistema al intervenir el nodo." }
+    { label: "Efecto cascada:", desc: "Cuánto desmantela este nodo respecto al más potente de la red (100% = máximo). El número entre paréntesis es el impacto absoluto, útil para comparar magnitud entre nodos de esta red." }
 ];
 
 guia.forEach(function(item){
+    _ensureSpace(10);
     doc.setFont("helvetica", "bold");
     doc.text(item.label, 16, finalY);
     doc.setFont("helvetica", "normal");
@@ -611,6 +749,7 @@ guia.forEach(function(item){
 finalY += 4;
 
 // ============ INTERPRETACIÓN CLÍNICA ============
+_ensureSpace(20);
 doc.setFont("helvetica", "bold");
 doc.setFontSize(12);
 doc.setTextColor(colorPrimary[0], colorPrimary[1], colorPrimary[2]);
@@ -633,6 +772,7 @@ var interpretacion = [
 
 interpretacion.forEach(function(line){
     var lines = doc.splitTextToSize("• " + line, pageWidth - 28);
+    _ensureSpace(lines.length * 4 + 1);
     doc.text(lines, 16, finalY);
     finalY += lines.length * 4 + 1;
 });
