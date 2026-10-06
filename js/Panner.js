@@ -75,25 +75,29 @@
 
     // --- ZOOM LOGIC ---
     // Scroll wheel zoom (PC) - SOLO con Ctrl/Cmd
-        canvasses.addEventListener('wheel', function(e) {
-            if (!e.ctrlKey && !e.metaKey) return; // sin Ctrl, no hacer nada
-            e.preventDefault();
-            var delta = e.deltaY || e.detail || -e.wheelDelta;
-            var zoomFactor = delta > 0 ? 0.9 : 1.1;
-            var newScale = loopy.offsetScale * zoomFactor;
-            newScale = Math.max(MIN_SCALE, Math.min(MAX_SCALE, newScale));
+canvasses.addEventListener('wheel', function(e) {
+    // if (!e.ctrlKey && !e.metaKey) return; // sin Ctrl/Cmd, no hacer nada
+    e.preventDefault();
 
-            // Zoom toward mouse position
-            var mouseX = Mouse.canvasX; 
-            var mouseY = Mouse.canvasY;
+    var delta = e.deltaY || e.detail || -e.wheelDelta;
+    var zoomFactor = delta > 0 ? 0.9 : 1.1;
+    var newScale = loopy.offsetScale * zoomFactor;
+    newScale = Math.max(MIN_SCALE, Math.min(MAX_SCALE, newScale));
 
-            var scaleChange = newScale / loopy.offsetScale;
-            loopy.offsetX = mouseX - (mouseX - loopy.offsetX) * scaleChange;
-            loopy.offsetY = mouseY - (mouseY - loopy.offsetY) * scaleChange;
-            loopy.offsetScale = newScale;
+    // Zoom siempre centrado en el medio del canvas,
+    // sin importar dónde esté el mouse.
+    var rect = canvasses.getBoundingClientRect();
+    var centerX = rect.width / 2;
+    var centerY = rect.height / 2;
 
-            publish("view/changed");
-        }, { passive: false });
+    var scaleChange = newScale / loopy.offsetScale;
+
+    loopy.offsetX = centerX - (centerX - loopy.offsetX) * scaleChange;
+    loopy.offsetY = centerY - (centerY - loopy.offsetY) * scaleChange;
+    loopy.offsetScale = newScale;
+
+    publish("view/changed");
+}, { passive: false });
 
         // --- MOBILE PAN & PINCH ---
         var startTouchDistance = 0;
@@ -160,6 +164,185 @@
                 publish("view/changed");
             }
         }, { passive: false });
+
+// ==========================================
+// TAP EN CANVAS VACÍO → CERRAR SIDEBAR (móvil/tablet)
+// ==========================================
+// Comportamiento deseado:
+// - Solo en pantallas chicas/táctiles.
+// - Solo si el sidebar está abierto.
+// - Solo si el tap fue limpio: sin arrastre, sin pan, sin pinch.
+// - Solo si el tap NO cayó sobre un nodo, arista ni label.
+// - No interfiere con la herramienta LABEL.
+// - No interfiere durante NIRA ni con modales abiertos.
+
+var _tapDismiss = {
+    active: false,
+    id: null,
+    startX: 0,
+    startY: 0,
+    startTime: 0,
+    moved: false,
+    multiTouch: false
+};
+
+function _isSidebarOpen() {
+    var sidebar = document.getElementById("sidebar");
+    return sidebar && sidebar.classList.contains("show");
+}
+
+function _closeSidebarMobile() {
+    var toggle = document.getElementById("sidebar-toggle");
+
+    if (toggle) {
+        toggle.click();
+        return;
+    }
+
+    // Fallback por si el botón no existe en algún modo embebido.
+    var sidebar = document.getElementById("sidebar");
+    if (sidebar) {
+        sidebar.classList.remove("show");
+    }
+}
+
+canvasses.addEventListener("touchstart", function(e) {
+    // Solo móvil/tablet según el breakpoint que ya usa Loopy.
+    if (window.innerWidth > 768) {
+        _tapDismiss.active = false;
+        return;
+    }
+
+    // No interferir si está corriendo NIRA.
+    if (loopy._niraRunning) {
+        _tapDismiss.active = false;
+        return;
+    }
+
+    // No interferir si hay un modal abierto.
+    if (loopy.modal && loopy.modal.isShowing) {
+        _tapDismiss.active = false;
+        return;
+    }
+
+    // Solo tiene sentido si el sidebar está abierto.
+    if (!_isSidebarOpen()) {
+        _tapDismiss.active = false;
+        return;
+    }
+
+    // Si hay dos dedos, cancelamos: es pan/pinch, no tap para cerrar.
+    if (e.touches.length > 1) {
+        _tapDismiss.active = false;
+        _tapDismiss.multiTouch = true;
+        return;
+    }
+
+    var touch = e.touches[0];
+
+    _tapDismiss.active = true;
+    _tapDismiss.id = touch.identifier;
+    _tapDismiss.startX = touch.clientX;
+    _tapDismiss.startY = touch.clientY;
+    _tapDismiss.startTime = Date.now();
+    _tapDismiss.moved = false;
+    _tapDismiss.multiTouch = false;
+}, { passive: true });
+
+canvasses.addEventListener("touchmove", function(e) {
+    if (!_tapDismiss.active) return;
+
+    // Si aparece un segundo dedo, ya no es un tap limpio.
+    if (e.touches.length > 1) {
+        _tapDismiss.active = false;
+        _tapDismiss.multiTouch = true;
+        return;
+    }
+
+    // Buscar el mismo touch por identifier.
+    var touch = null;
+    for (var i = 0; i < e.touches.length; i++) {
+        if (e.touches[i].identifier === _tapDismiss.id) {
+            touch = e.touches[i];
+            break;
+        }
+    }
+
+    if (!touch) return;
+
+    var dx = Math.abs(touch.clientX - _tapDismiss.startX);
+    var dy = Math.abs(touch.clientY - _tapDismiss.startY);
+
+    // Si se movió demasiado, fue arrastre/pan, no tap.
+    if (dx > 15 || dy > 15) {
+        _tapDismiss.moved = true;
+    }
+}, { passive: true });
+
+canvasses.addEventListener("touchend", function(e) {
+    if (!_tapDismiss.active) return;
+
+    _tapDismiss.active = false;
+
+    // Solo móvil/tablet.
+    if (window.innerWidth > 768) return;
+
+    // Si hubo segundo dedo, no cerrar.
+    if (_tapDismiss.multiTouch) return;
+
+    // Si hubo movimiento, no cerrar.
+    if (_tapDismiss.moved) return;
+
+    // Si fue long press, no cerrar.
+    // 450 ms es generoso pero evita confundirse con presión prolongada.
+    if (Date.now() - _tapDismiss.startTime > 450) return;
+
+    // Re-checks por si algo cambió entre touchstart y touchend.
+    if (loopy._niraRunning) return;
+    if (loopy.modal && loopy.modal.isShowing) return;
+    if (!_isSidebarOpen()) return;
+
+    // Si estamos en herramienta LABEL, un tap vacío crea label.
+    // No queremos cerrar el menú en ese caso.
+    if (loopy.tool === Loopy.TOOL_LABEL) return;
+
+    // Obtener el touch que terminó.
+    var changed = null;
+    for (var i = 0; i < e.changedTouches.length; i++) {
+        if (e.changedTouches[i].identifier === _tapDismiss.id) {
+            changed = e.changedTouches[i];
+            break;
+        }
+    }
+
+    if (!changed) changed = e.changedTouches[0];
+    if (!changed) return;
+
+    // Convertir coordenadas de pantalla a coordenadas de canvas.
+    var rect = canvasses.getBoundingClientRect();
+    var canvasX = changed.clientX - rect.left;
+    var canvasY = changed.clientY - rect.top;
+
+    // Convertir coordenadas de canvas a coordenadas de mundo.
+    var worldX = (canvasX - loopy.offsetX) / loopy.offsetScale;
+    var worldY = (canvasY - loopy.offsetY) / loopy.offsetScale;
+
+    // Si el tap cayó sobre un nodo, arista o label, NO cerrar.
+    // Eso debe seguir seleccionando/editando el objeto.
+    if (loopy.model.getNodeByPoint(worldX, worldY)) return;
+    if (loopy.model.getLabelByPoint(worldX, worldY)) return;
+    if (loopy.model.getEdgeByPoint(worldX, worldY)) return;
+
+    // Era canvas vacío: cerrar el menú.
+    _closeSidebarMobile();
+}, { passive: true });
+
+canvasses.addEventListener("touchcancel", function() {
+    _tapDismiss.active = false;
+    _tapDismiss.multiTouch = false;
+    _tapDismiss.moved = false;
+}, { passive: true });
+
 
     };
 
