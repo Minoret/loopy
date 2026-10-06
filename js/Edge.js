@@ -7,6 +7,9 @@ EDGE!
 Edge.allSignals = [];
 Edge.MAX_SIGNALS = 100;
 Edge.MAX_SIGNALS_PER_EDGE = 10;
+// Diagnóstico NIRA: señales descartadas por los topes y pico de señales en vuelo.
+Edge.droppedSignals = 0;
+Edge.peakSignals = 0;
 Edge.defaultStrength = 0.1;
 
 function Edge(model, config){
@@ -39,11 +42,13 @@ function Edge(model, config){
 
         // IF ALREADY TOO MANY, FORGET IT
         if(Edge.allSignals.length>Edge.MAX_SIGNALS){
+            Edge.droppedSignals++;
             return;
         }
 
         // IF TOO MANY *ON THIS EDGE*, FORGET IT
         if(self.signals.length>Edge.MAX_SIGNALS_PER_EDGE){
+            Edge.droppedSignals++;
             return;
         }
 
@@ -71,6 +76,7 @@ function Edge(model, config){
 
         // ALL signals.
         Edge.allSignals.push(newSignal);
+        if(Edge.allSignals.length>Edge.peakSignals) Edge.peakSignals = Edge.allSignals.length;
 
     };
     self.updateSignals = function(){
@@ -221,7 +227,9 @@ function Edge(model, config){
         ////////////////////////////////////////////////
 
         // Edge case: if arc is EXACTLY zero, whatever, add 0.1 to it.
-        if(self.arc==0) self.arc=0.1;
+        if (Math.abs(self.arc) < 0.5) {
+    	    self.arc = self.arc < 0 ? -0.5 : 0.5;
+	}
 
         // Mathy calculations: (all retina, btw)
         fx=self.from.x*2;
@@ -363,6 +371,10 @@ function Edge(model, config){
 
     // Draw
     self.draw = function(ctx){
+
+        if(self.y !== 0 && ((self.arc > 0) !== (self.y2 === self.y))){
+            self.update(self.loopy.model.speed);
+        }
 
         // Width & Color
         ctx.lineWidth = 2 + 8 * Math.abs(self.strength);
