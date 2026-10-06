@@ -65,7 +65,6 @@ function Loopy(config){
         if (self.selectedNodes.indexOf(node) === -1) {
             self.selectedNodes.push(node);
             publish("selection/changed", self.selectedNodes);
-            publish("model/changed");
         }
     };
 
@@ -77,14 +76,12 @@ function Loopy(config){
             self.selectedNodes.splice(index, 1);
         }
         publish("selection/changed", self.selectedNodes);
-	publish("model/changed");
     };
 
     self.deselectAll = function() {
         if (self.selectedNodes.length > 0) {
             self.selectedNodes = [];
             publish("selection/changed", self.selectedNodes);
-	    publish("model/changed");
         }
     };
     
@@ -630,32 +627,47 @@ function Loopy(config){
     // Escala las posiciones X e Y de los nodos proporcionalmente 
     // al cambiar el tamaño de la ventana, manteniendo su celda de grilla.
     // ==========================================
-    var canvassesEl = document.getElementById("canvasses");
-    var lastW = canvassesEl.clientWidth || window.innerWidth;
-    var lastH = canvassesEl.clientHeight || window.innerHeight;
+var canvassesEl = document.getElementById("canvasses");
+var lastW = canvassesEl.clientWidth || window.innerWidth;
+var lastH = canvassesEl.clientHeight || window.innerHeight;
+var _resizeRecenterTimer = null;
 
-    window.addEventListener("resize", function() {
-        var newW = canvassesEl.clientWidth || window.innerWidth;
-        var newH = canvassesEl.clientHeight || window.innerHeight;
-        
-        // Evitar cálculos si el tamaño no cambió realmente
-        if (newW === lastW && newH === lastH) return;
-        
-        var scaleX = newW / lastW;
-        var scaleY = newH / lastH;
-        
-        // Escalar las coordenadas de todos los nodos
-        for (var i = 0; i < self.model.nodes.length; i++) {
-            var node = self.model.nodes[i];
-            node.x = node.x * scaleX;
-            node.y = node.y * scaleY;
+window.addEventListener("resize", function() {
+    var newW = canvassesEl.clientWidth || window.innerWidth;
+    var newH = canvassesEl.clientHeight || window.innerHeight;
+
+    // Evitar cálculos si el tamaño no cambió realmente
+    if (newW === lastW && newH === lastH) return;
+
+    var scaleX = newW / lastW;
+    var scaleY = newH / lastH;
+
+    // Escalar las coordenadas de todos los nodos
+    for (var i = 0; i < self.model.nodes.length; i++) {
+        var node = self.model.nodes[i];
+        node.x = node.x * scaleX;
+        node.y = node.y * scaleY;
+    }
+
+    // Actualizar las dimensiones de referencia para el próximo resize
+    lastW = newW;
+    lastH = newH;
+
+    // Forzar el redibujado del canvas
+    publish("view/changed");
+
+    // Auto-centrar la vista después de que el usuario termine de redimensionar.
+    // Se usa click() sobre el botón existente para replicar exactamente lo que hacés vos.
+    clearTimeout(_resizeRecenterTimer);
+    _resizeRecenterTimer = setTimeout(function() {
+        var recenterBtn = document.getElementById("recenter-button");
+
+        if (recenterBtn) {
+            recenterBtn.click();
+        } else if (self.model && typeof self.model.center === "function") {
+            // Fallback por si el botón no existe en algún modo embebido.
+            self.model.center();
         }
-        
-        // Actualizar las dimensiones de referencia para el próximo resize
-        lastW = newW;
-        lastH = newH;
-        
-        // Forzar el redibujado del canvas (las aristas se actualizarán solas)
-        publish("view/changed");
-    });
+    }, 150);
+});
 }
